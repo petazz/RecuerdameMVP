@@ -12,7 +12,7 @@ interface Profile {
   id: string;
   email: string;
   role: 'admin' | 'manager';
-  center_id: string | null;
+  center_id?: string | null;
 }
 
 interface User {
@@ -142,7 +142,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <DashboardLayout profile={profile || undefined}>
+    <DashboardLayout profile={profile ? { 
+      email: profile.email, 
+      role: profile.role, 
+      center_id: profile.center_id || undefined 
+    } : undefined}>
       <div className="space-y-8">
         {/* Header */}
         <div>
