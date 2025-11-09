@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-
-
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -16,13 +14,80 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #f9fafb;
+    --foreground: #111827;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Animación para los toasts */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Mejoras de accesibilidad */
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Botones más grandes en móviles */
+@media (max-width: 640px) {
+  button {
+    min-height: 48px;
+  }
+  
+  input, select, textarea {
+    min-height: 48px;
+    font-size: 16px; /* Evita zoom automático en iOS */
+  }
+}
+
+/* Scroll suave */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Mejoras de contraste para textos pequeños */
+.text-sm {
+  font-weight: 500;
+}
+
+/* Asegurar que los elementos interactivos sean lo suficientemente grandes */
+a, button {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Espaciado consistente */
+* {
+  box-sizing: border-box;
+}
+
+/* Prevenir flash de contenido sin estilo */
+.hydrated {
+  visibility: visible;
 }
