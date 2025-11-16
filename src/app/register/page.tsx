@@ -3,17 +3,16 @@
 import { useState } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function RegisterPage() {
   const router = useRouter();
-  
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: '',
     role: 'manager' as 'admin' | 'manager',
   });
-  
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,7 +65,7 @@ export default function RegisterPage() {
               id: authData.user.id,
               email: formData.email,
               role: formData.role,
-              center_id: null, // Puedes agregar esto en un formulario más avanzado luego
+              center_id: null,
             },
           ]);
 
@@ -88,155 +87,134 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div style={{ maxWidth: 400, margin: '50px auto', padding: 20, textAlign: 'center' }}>
-        <h2 style={{ color: 'green' }}>¡Registro exitoso!</h2>
-        <p>Por favor, verifica tu correo electrónico para confirmar la cuenta.</p>
-        <button
-          onClick={() => router.push('/login')}
-          style={{
-            padding: 10,
-            backgroundColor: '#0070f3',
-            color: 'white',
-            border: 'none',
-            borderRadius: 4,
-            cursor: 'pointer',
-          }}
-        >
-          Ir al login
-        </button>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100 px-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="mb-6">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Registro exitoso!</h2>
+            <p className="text-gray-600">Por favor, verifica tu correo electrónico para confirmar la cuenta.</p>
+          </div>
+          <button
+            onClick={() => router.push('/login')}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-200"
+          >
+            Ir al login
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: 400, margin: '50px auto', padding: 20 }}>
-      <h1>Registro de Manager/Admin</h1>
-      
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: 15 }}>
-          <label htmlFor="email" style={{ display: 'block', marginBottom: 5, fontWeight: 'bold' }}>
-            Email:
-          </label>
-          <input
-            id="email"
-            type="email"
-            name="email"
-            value={formData.email}
-            onChange={handleChange}
-            required
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 4,
-              border: '1px solid #ccc',
-              boxSizing: 'border-box',
-            }}
-          />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-12">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">Crear cuenta</h1>
+          <p className="text-gray-600 mt-2">Registro de Manager/Admin</p>
         </div>
 
-        <div style={{ marginBottom: 15 }}>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: 5, fontWeight: 'bold' }}>
-            Contraseña:
-          </label>
-          <input
-            id="password"
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            required
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 4,
-              border: '1px solid #ccc',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 15 }}>
-          <label htmlFor="confirmPassword" style={{ display: 'block', marginBottom: 5, fontWeight: 'bold' }}>
-            Confirmar contraseña:
-          </label>
-          <input
-            id="confirmPassword"
-            type="password"
-            name="confirmPassword"
-            value={formData.confirmPassword}
-            onChange={handleChange}
-            required
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 4,
-              border: '1px solid #ccc',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 15 }}>
-          <label htmlFor="role" style={{ display: 'block', marginBottom: 5, fontWeight: 'bold' }}>
-            Rol:
-          </label>
-          <select
-            id="role"
-            name="role"
-            value={formData.role}
-            onChange={handleChange}
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 4,
-              border: '1px solid #ccc',
-              boxSizing: 'border-box',
-            }}
-          >
-            <option value="manager">Manager</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-
-        {error && (
-          <div
-            style={{
-              backgroundColor: '#fee',
-              color: '#c00',
-              padding: 10,
-              borderRadius: 4,
-              marginBottom: 15,
-            }}
-          >
-            {error}
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Email */}
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              placeholder="tu@email.com"
+            />
           </div>
-        )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: 12,
-            backgroundColor: loading ? '#ccc' : '#0070f3',
-            color: 'white',
-            border: 'none',
-            borderRadius: 4,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            fontSize: 16,
-            fontWeight: 'bold',
-          }}
-        >
-          {loading ? 'Registrando...' : 'Registrarse'}
-        </button>
-      </form>
+          {/* Password */}
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              Contraseña
+            </label>
+            <input
+              id="password"
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              placeholder="••••••••"
+            />
+          </div>
 
-      <p style={{ marginTop: 20, textAlign: 'center' }}>
-        ¿Ya tienes cuenta?{' '}
-        <a href="/login" style={{ color: '#0070f3', textDecoration: 'none' }}>
-          Inicia sesión
-        </a>
-      </p>
+          {/* Confirm Password */}
+          <div>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+              Confirmar contraseña
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              required
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {/* Role */}
+          <div>
+            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
+              Rol
+            </label>
+            <select
+              id="role"
+              name="role"
+              value={formData.role}
+              onChange={handleChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            >
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Registrando...' : 'Registrarse'}
+          </button>
+        </form>
+
+        {/* Footer */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-600">
+            ¿Ya tienes cuenta?{' '}
+            <Link href="/login" className="text-blue-600 hover:text-blue-700 font-medium">
+              Inicia sesión
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
