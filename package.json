@@ -2,6 +2,7 @@
   "name": "mi-mvp-recurdame",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,7 +10,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@11labs/client": "^0.2.0",
+    "@elevenlabs/client": "^0.11.0",
     "@supabase/supabase-js": "^2.78.0",
     "next": "16.0.1",
     "qrcode.react": "^4.2.0",

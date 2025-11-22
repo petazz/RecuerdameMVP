@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { Conversation } from '@11labs/client';
 
 interface UseElevenLabsConfig {
   agentId?: string;
@@ -29,7 +30,12 @@ interface UseElevenLabsReturn {
 
 /**
  * Hook para integración con ElevenLabs Conversational AI
- * Usa importación dinámica para evitar problemas de SSR
+ * 
+ * IMPORTANTE: Para correlacionar llamadas con el webhook, este hook:
+ * 1. Obtiene una signed URL del backend (que incluye el agentId)
+ * 2. Inicia la conversación con el SDK
+ * 3. Guarda el conversation_id de ElevenLabs en nuestra BD
+ * 4. El webhook usa conversation_id para encontrar la llamada
  */
 export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn {
   const [isConnected, setIsConnected] = useState(false);
@@ -38,7 +44,7 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const conversationRef = useRef<any>(null);
+  const conversationRef = useRef<Conversation | null>(null);
 
   /**
    * Solicita permisos de micrófono
@@ -85,6 +91,7 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
 
   /**
    * Conecta con el agente de ElevenLabs
+   * @returns conversation_id de ElevenLabs o null si falla
    */
   const connect = useCallback(async (options: ConnectOptions): Promise<string | null> => {
     const { callId, userId, userName } = options;
@@ -107,20 +114,19 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
 
       console.log('[ElevenLabs] Iniciando sesión con signed URL...');
 
-      // 3. Importar dinámicamente el SDK (evita problemas de SSR)
-      const { Conversation } = await import('@elevenlabs/client');
-
-      // 4. Iniciar sesión con ElevenLabs usando signed URL
+      // 3. Iniciar sesión con ElevenLabs usando signed URL
       const conversation = await Conversation.startSession({
         signedUrl: signedUrl,
 
-        onModeChange: (mode: { mode: string }) => {
+        // Callback cuando el agente empieza/termina de hablar
+        onModeChange: (mode) => {
           console.log('[ElevenLabs] Modo:', mode.mode);
           setIsSpeaking(mode.mode === 'speaking');
           config?.onStatusChange?.(mode.mode);
         },
 
-        onMessage: (message: { source: string; message: string }) => {
+        // Callback para mensajes
+        onMessage: (message) => {
           console.log('[ElevenLabs] Mensaje:', message.source, '-', message.message);
           config?.onMessage?.({
             role: message.source,
@@ -128,13 +134,15 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
           });
         },
 
-        onError: (err: any) => {
+        // Callback para errores
+        onError: (err) => {
           console.error('[ElevenLabs] Error en conversación:', err);
           const errorMsg = typeof err === 'string' ? err : 'Error en la conversación';
           setError(errorMsg);
           config?.onError?.(errorMsg);
         },
 
+        // Callback cuando se desconecta
         onDisconnect: () => {
           console.log('[ElevenLabs] Desconectado');
           setIsConnected(false);
@@ -145,8 +153,9 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
 
       conversationRef.current = conversation;
       
-      // Obtener el conversation_id
-      const elevenLabsConversationId = conversation.getId ? conversation.getId() : callId;
+      // 4. Obtener el conversation_id de ElevenLabs
+      // El SDK devuelve el ID de la conversación
+      const elevenLabsConversationId = conversation.getId();
       console.log('[ElevenLabs] Conversation ID:', elevenLabsConversationId);
       
       setConversationId(elevenLabsConversationId);
