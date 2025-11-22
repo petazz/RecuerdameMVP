@@ -1,53 +1,65 @@
-// src/hooks/useCallSession.ts
-import { useState, useCallback, useEffect } from 'react';
+'use client';
+
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useElevenLabs } from '@/hooks/useElevenLabs';
 
-type CallState = 'ready' | 'calling' | 'ended';
+type CallState = 'ready' | 'connecting' | 'calling' | 'ended';
 
-interface CallSessionState {
+interface UseCallSessionReturn {
   callState: CallState;
   callDuration: number;
   error: string | null;
-  canStartCall: boolean; // Nueva propiedad para límite diario
+  canStartCall: boolean;
   callsToday: number;
-}
-
-interface CallSessionActions {
+  isSpeaking: boolean;
   startCall: () => Promise<void>;
-  endCall: () => void;
+  endCall: () => Promise<void>;
   resetCall: () => void;
 }
 
-type UseCallSessionReturn = CallSessionState & CallSessionActions;
-
-// Configuración de ElevenLabs desde variables de entorno
-const ELEVENLABS_CONFIG = {
-  agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || '',
-  apiKey: process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || '',
-};
-
 /**
  * Hook para manejar sesiones de llamada con ElevenLabs
- * Incluye lógica de límite de 2 llamadas por día
+ * Integra límite de 2 llamadas/día y persistencia en BD
  */
 export function useCallSession(userId: string): UseCallSessionReturn {
   const [callState, setCallState] = useState<CallState>('ready');
-  const [callDuration, setCallDuration] = useState<number>(0);
+  const [callDuration, setCallDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
-  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [canStartCall, setCanStartCall] = useState(true);
   const [callsToday, setCallsToday] = useState(0);
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
+
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<Date | null>(null);
 
   // Hook de ElevenLabs
-  const { isConnected, isConnecting, connect, disconnect, error: elevenLabsError } = 
-    useElevenLabs(ELEVENLABS_CONFIG);
+  const {
+    isConnected,
+    isConnecting,
+    isSpeaking,
+    error: elevenLabsError,
+    connect,
+    disconnect,
+  } = useElevenLabs({
+    agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || '',
+    onError: (err) => setError(err),
+    onStatusChange: (status) => console.log('[CallSession] Status:', status),
+  });
 
   // Verificar límite diario al montar
   useEffect(() => {
     checkDailyLimit();
   }, [userId]);
+
+  // Sincronizar estado de conexión
+  useEffect(() => {
+    if (isConnecting) {
+      setCallState('connecting');
+    } else if (isConnected) {
+      setCallState('calling');
+    }
+  }, [isConnected, isConnecting]);
 
   // Sincronizar errores de ElevenLabs
   useEffect(() => {
@@ -57,11 +69,11 @@ export function useCallSession(userId: string): UseCallSessionReturn {
   }, [elevenLabsError]);
 
   /**
-   * Verifica el límite de 2 llamadas por día
+   * Verifica el límite de 2 llamadas por día según timezone del centro
    */
   const checkDailyLimit = async () => {
     try {
-      // 1. Obtener timezone del centro del usuario
+      // 1. Obtener timezone del centro
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('center_id, centers(timezone)')
@@ -70,12 +82,18 @@ export function useCallSession(userId: string): UseCallSessionReturn {
 
       if (userError) throw userError;
 
-      const timezone = (userData.centers as any)?.timezone || 'Europe/Madrid';
+      const timezone = (userData?.centers as any)?.timezone || 'Europe/Madrid';
 
-      // 2. Calcular inicio del día en el timezone del centro
+      // 2. Calcular inicio del día en timezone del centro
       const now = new Date();
-      const startOfDay = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-      startOfDay.setHours(0, 0, 0, 0);
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const todayStr = formatter.format(now);
+      const startOfDay = new Date(`${todayStr}T00:00:00`);
 
       // 3. Contar llamadas del día
       const { data: calls, error: callsError } = await supabase
@@ -94,11 +112,23 @@ export function useCallSession(userId: string): UseCallSessionReturn {
       if (todayCount >= 2) {
         setError('Has alcanzado el límite de 2 llamadas por día');
       }
-
     } catch (err: any) {
       console.error('[CallSession] Error verificando límite:', err);
-      setError('Error al verificar límite de llamadas');
     }
+  };
+
+  /**
+   * Obtiene el center_id del usuario
+   */
+  const getUserCenterId = async (): Promise<string> => {
+    const { data, error } = await supabase
+      .from('users')
+      .select('center_id')
+      .eq('id', userId)
+      .single();
+
+    if (error) throw error;
+    return data.center_id;
   };
 
   /**
@@ -108,46 +138,47 @@ export function useCallSession(userId: string): UseCallSessionReturn {
     try {
       setError(null);
 
-      // Verificar límite antes de iniciar
+      // Verificar límite
       if (!canStartCall) {
         setError('Has alcanzado el límite de 2 llamadas por día');
         return;
       }
 
       console.log('[CallSession] Iniciando llamada para usuario:', userId);
+      setCallState('connecting');
 
       // 1. Crear registro de llamada en BD
+      const centerId = await getUserCenterId();
       const { data: callData, error: callError } = await supabase
         .from('calls')
-        .insert([
-          {
-            user_id: userId,
-            center_id: (await getUserCenterId(userId)),
-            started_at: new Date().toISOString(),
-            status: 'started',
-          },
-        ])
+        .insert([{
+          user_id: userId,
+          center_id: centerId,
+          started_at: new Date().toISOString(),
+          status: 'started',
+        }])
         .select()
         .single();
 
       if (callError) throw callError;
 
-      setCurrentCallId(callData.id);
-      console.log('[CallSession] Call ID creado:', callData.id);
+      const callId = callData.id;
+      setCurrentCallId(callId);
+      console.log('[CallSession] Call ID creado:', callId);
 
-      // 2. Conectar con ElevenLabs
-      await connect();
+      // 2. Conectar con ElevenLabs pasando callId como metadata
+      await connect({ callId });
 
-      // 3. Actualizar estado de UI
-      setCallState('calling');
-
-      // 4. Iniciar contador de duración
-      const id = setInterval(() => {
-        setCallDuration(prev => prev + 1);
+      // 3. Iniciar contador de duración
+      startTimeRef.current = new Date();
+      intervalRef.current = setInterval(() => {
+        if (startTimeRef.current) {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000);
+          setCallDuration(elapsed);
+        }
       }, 1000);
-      setIntervalId(id);
 
-      // 5. Actualizar contadores
+      // 4. Actualizar contadores
       setCallsToday(prev => prev + 1);
       if (callsToday + 1 >= 2) {
         setCanStartCall(false);
@@ -158,7 +189,7 @@ export function useCallSession(userId: string): UseCallSessionReturn {
       setError(err.message || 'Error al iniciar la llamada');
       setCallState('ready');
 
-      // Limpiar llamada fallida
+      // Marcar llamada como fallida si se creó
       if (currentCallId) {
         await supabase
           .from('calls')
@@ -176,33 +207,39 @@ export function useCallSession(userId: string): UseCallSessionReturn {
 
     try {
       // 1. Detener contador
-      if (intervalId) {
-        clearInterval(intervalId);
-        setIntervalId(null);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
 
       // 2. Desconectar ElevenLabs
-      disconnect();
+      await disconnect();
 
-      // 3. Actualizar registro en BD
+      // 3. Calcular duración final
+      const finalDuration = startTimeRef.current
+        ? Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000)
+        : callDuration;
+
+      // 4. Actualizar registro en BD
       if (currentCallId) {
         await supabase
           .from('calls')
           .update({
             status: 'completed',
             ended_at: new Date().toISOString(),
-            duration_seconds: callDuration,
+            duration_seconds: finalDuration,
           })
           .eq('id', currentCallId);
       }
 
       setCallState('ended');
+      setCallDuration(finalDuration);
 
     } catch (err: any) {
       console.error('[CallSession] Error al finalizar llamada:', err);
       setError('Error al finalizar la llamada');
     }
-  }, [intervalId, disconnect, currentCallId, callDuration]);
+  }, [disconnect, currentCallId, callDuration]);
 
   /**
    * Reinicia la interfaz para nueva llamada
@@ -210,19 +247,29 @@ export function useCallSession(userId: string): UseCallSessionReturn {
   const resetCall = useCallback(() => {
     console.log('[CallSession] Reiniciando interfaz');
 
-    if (intervalId) {
-      clearInterval(intervalId);
-      setIntervalId(null);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
 
     setCallState('ready');
     setCallDuration(0);
     setCurrentCallId(null);
     setError(null);
+    startTimeRef.current = null;
 
     // Verificar límite de nuevo
     checkDailyLimit();
-  }, [intervalId]);
+  }, []);
+
+  // Cleanup al desmontar
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   return {
     callState,
@@ -230,22 +277,9 @@ export function useCallSession(userId: string): UseCallSessionReturn {
     error,
     canStartCall,
     callsToday,
+    isSpeaking,
     startCall,
     endCall,
     resetCall,
   };
-}
-
-/**
- * Obtiene el center_id del usuario
- */
-async function getUserCenterId(userId: string): Promise<string> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('center_id')
-    .eq('id', userId)
-    .single();
-
-  if (error) throw error;
-  return data.center_id;
 }
