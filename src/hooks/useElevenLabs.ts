@@ -37,12 +37,9 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
   const conversationRef = useRef<any>(null);
 
-  /**
-   * Solicita permisos de micrófono
-   */
+  // Solicita permisos de micrófono
   const requestMicrophonePermission = async (): Promise<boolean> => {
     try {
       console.log('[ElevenLabs] Solicitando permisos de micrófono...');
@@ -56,122 +53,116 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
     }
   };
 
-  /**
-   * Obtiene signed URL del backend
-   */
-  const getSignedUrl = async (callId: string, userId?: string, userName?: string): Promise<string | null> => {
+  // Obtiene signed URL del backend
+  const getSignedUrl = async (
+    callId: string,
+    userId?: string,
+    userName?: string
+  ): Promise<string | null> => {
     try {
       console.log('[ElevenLabs] Obteniendo signed URL...');
-      // Nota: callId, userId, userName ya no se envían al backend (endpoint usa agent_id de .env)
       
       const response = await fetch('/api/elevenlabs/session', {
         method: 'GET',
       });
-
+      
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Error obteniendo signed URL');
       }
-
+      
       const data = await response.json();
-      console.log('[ElevenLabs] Signed URL obtenida');
-      return data.signedUrl;
+      console.log('[ElevenLabs] Signed URL obtenida:', data);
+      
+      // ✅ CORRECCIÓN: La respuesta viene como "signed_url" (con guión bajo)
+      return data.signed_url;
     } catch (err: any) {
       console.error('[ElevenLabs] Error obteniendo signed URL:', err);
       throw err;
     }
   };
 
-  /**
-   * Conecta con el agente de ElevenLabs
-   */
-  const connect = useCallback(async (options: ConnectOptions): Promise<string | null> => {
-    const { callId, userId, userName } = options;
+  // Conecta con el agente de ElevenLabs
+  const connect = useCallback(
+    async (options: ConnectOptions): Promise<string | null> => {
+      const { callId, userId, userName } = options;
+      setIsConnecting(true);
+      setError(null);
 
-    setIsConnecting(true);
-    setError(null);
+      try {
+        // 1. Solicitar permisos de micrófono
+        const hasPermission = await requestMicrophonePermission();
+        if (!hasPermission) {
+          throw new Error('No se pudo acceder al micrófono. Por favor, permite el acceso.');
+        }
 
-    try {
-      // 1. Solicitar permisos de micrófono
-      const hasPermission = await requestMicrophonePermission();
-      if (!hasPermission) {
-        throw new Error('No se pudo acceder al micrófono. Por favor, permite el acceso.');
+        // 2. Obtener signed URL del backend
+        const signedUrl = await getSignedUrl(callId, userId, userName);
+        if (!signedUrl) {
+          throw new Error('No se pudo obtener la URL de conexión');
+        }
+
+        console.log('[ElevenLabs] Iniciando sesión con signed URL...');
+
+        // 3. Importar dinámicamente el SDK (evita problemas de SSR)
+        const ElevenLabs = await import('@elevenlabs/client');
+
+        // 4. Iniciar sesión con ElevenLabs usando signed URL
+        const conversation = await ElevenLabs.Conversation.startSession({
+          signedUrl: signedUrl,
+          onModeChange: (mode: { mode: string }) => {
+            console.log('[ElevenLabs] Modo:', mode.mode);
+            setIsSpeaking(mode.mode === 'speaking');
+            config?.onStatusChange?.(mode.mode);
+          },
+          onMessage: (message: { source: string; message: string }) => {
+            console.log('[ElevenLabs] Mensaje:', message.source, '-', message.message);
+            config?.onMessage?.({
+              role: message.source,
+              content: message.message,
+            });
+          },
+          onError: (err: any) => {
+            console.error('[ElevenLabs] Error en conversación:', err);
+            const errorMsg = typeof err === 'string' ? err : 'Error en la conversación';
+            setError(errorMsg);
+            config?.onError?.(errorMsg);
+          },
+          onDisconnect: () => {
+            console.log('[ElevenLabs] Desconectado');
+            setIsConnected(false);
+            setIsSpeaking(false);
+            config?.onDisconnect?.();
+          },
+        });
+
+        conversationRef.current = conversation;
+
+        // Obtener el conversation_id
+        const elevenLabsConversationId = conversation.getId ? conversation.getId() : callId;
+        console.log('[ElevenLabs] Conversation ID:', elevenLabsConversationId);
+
+        setConversationId(elevenLabsConversationId);
+        setIsConnected(true);
+        config?.onConnect?.(elevenLabsConversationId);
+
+        return elevenLabsConversationId;
+      } catch (err: any) {
+        console.error('[ElevenLabs] Error al conectar:', err);
+        const errorMsg = err.message || 'Error al conectar con ElevenLabs';
+        setError(errorMsg);
+        config?.onError?.(errorMsg);
+        return null;
+      } finally {
+        setIsConnecting(false);
       }
+    },
+    [config]
+  );
 
-      // 2. Obtener signed URL del backend
-      const signedUrl = await getSignedUrl(callId, userId, userName);
-      if (!signedUrl) {
-        throw new Error('No se pudo obtener la URL de conexión');
-      }
-
-      console.log('[ElevenLabs] Iniciando sesión con signed URL...');
-
-      // 3. Importar dinámicamente el SDK (evita problemas de SSR)
-      const ElevenLabs = await import('@elevenlabs/client');
-
-      // 4. Iniciar sesión con ElevenLabs usando signed URL
-      const conversation = await ElevenLabs.Conversation.startSession({
-        signedUrl: signedUrl,
-
-        onModeChange: (mode: { mode: string }) => {
-          console.log('[ElevenLabs] Modo:', mode.mode);
-          setIsSpeaking(mode.mode === 'speaking');
-          config?.onStatusChange?.(mode.mode);
-        },
-
-        onMessage: (message: { source: string; message: string }) => {
-          console.log('[ElevenLabs] Mensaje:', message.source, '-', message.message);
-          config?.onMessage?.({
-            role: message.source,
-            content: message.message,
-          });
-        },
-
-        onError: (err: any) => {
-          console.error('[ElevenLabs] Error en conversación:', err);
-          const errorMsg = typeof err === 'string' ? err : 'Error en la conversación';
-          setError(errorMsg);
-          config?.onError?.(errorMsg);
-        },
-
-        onDisconnect: () => {
-          console.log('[ElevenLabs] Desconectado');
-          setIsConnected(false);
-          setIsSpeaking(false);
-          config?.onDisconnect?.();
-        },
-      });
-
-      conversationRef.current = conversation;
-      
-      // Obtener el conversation_id
-      const elevenLabsConversationId = conversation.getId ? conversation.getId() : callId;
-      console.log('[ElevenLabs] Conversation ID:', elevenLabsConversationId);
-      
-      setConversationId(elevenLabsConversationId);
-      setIsConnected(true);
-      
-      config?.onConnect?.(elevenLabsConversationId);
-
-      return elevenLabsConversationId;
-
-    } catch (err: any) {
-      console.error('[ElevenLabs] Error al conectar:', err);
-      const errorMsg = err.message || 'Error al conectar con ElevenLabs';
-      setError(errorMsg);
-      config?.onError?.(errorMsg);
-      return null;
-    } finally {
-      setIsConnecting(false);
-    }
-  }, [config]);
-
-  /**
-   * Desconecta la sesión actual
-   */
+  // Desconecta la sesión actual
   const disconnect = useCallback(async () => {
     console.log('[ElevenLabs] Desconectando...');
-
     try {
       if (conversationRef.current) {
         await conversationRef.current.endSession();
