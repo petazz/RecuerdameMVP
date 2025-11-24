@@ -108,10 +108,10 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
       console.log('[ElevenLabs] Iniciando sesión con signed URL...');
 
       // 3. Importar dinámicamente el SDK (evita problemas de SSR)
-      const { Conversation } = await import('@elevenlabs/client');
+      const ElevenLabs = await import('@elevenlabs/client');
 
       // 4. Iniciar sesión con ElevenLabs usando signed URL
-      const conversation = await Conversation.startSession({
+      const conversation = await ElevenLabs.Conversation.startSession({
         signedUrl: signedUrl,
 
         onModeChange: (mode: { mode: string }) => {

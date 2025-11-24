@@ -1,73 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_AGENT_ID = process.env.ELEVENLABS_AGENT_ID;
-
-export async function POST(request: NextRequest) {
-  console.log('[ElevenLabs Session] Iniciando solicitud de signed URL');
-
+export async function GET(request: NextRequest) {
   try {
-    if (!ELEVENLABS_API_KEY) {
-      console.error('[ElevenLabs Session] ELEVENLABS_API_KEY no configurada');
-      return NextResponse.json(
-        { error: 'Configuración de ElevenLabs incompleta' },
-        { status: 500 }
-      );
-    }
+    const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+    const apiKey = process.env.ELEVENLABS_API_KEY;
 
-    if (!ELEVENLABS_AGENT_ID) {
-      console.error('[ElevenLabs Session] ELEVENLABS_AGENT_ID no configurado');
+    if (!agentId) {
       return NextResponse.json(
         { error: 'Agent ID no configurado' },
-        { status: 500 }
-      );
-    }
-
-    const body = await request.json();
-    const { callId } = body;
-
-    if (!callId) {
-      return NextResponse.json(
-        { error: 'callId es requerido' },
         { status: 400 }
       );
     }
 
-    console.log('[ElevenLabs Session] Solicitando signed URL para callId:', callId);
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'API Key no configurada' },
+        { status: 400 }
+      );
+    }
+
+    console.log('[ElevenLabs] Obteniendo signed URL para agent:', agentId);
 
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${ELEVENLABS_AGENT_ID}`,
+      `https://api.elevenlabs.io/v1/convai/agents/${agentId}/signed-url`,
       {
         method: 'GET',
         headers: {
-          'xi-api-key': ELEVENLABS_API_KEY,
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
         },
       }
     );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[ElevenLabs Session] Error de API:', response.status, errorText);
+      const error = await response.text();
+      console.error('[ElevenLabs] Error:', response.status, error);
       return NextResponse.json(
-        { error: `Error de ElevenLabs: ${response.status}` },
+        { error: `ElevenLabs error: ${response.status}` },
         { status: response.status }
       );
     }
 
     const data = await response.json();
-    console.log('[ElevenLabs Session] Signed URL obtenida correctamente');
+    console.log('[ElevenLabs] Signed URL obtenida exitosamente');
 
-    return NextResponse.json({
-      signedUrl: data.signed_url,
-      callId,
-      agentId: ELEVENLABS_AGENT_ID,
-    });
-
-  } catch (error: any) {
-    console.error('[ElevenLabs Session] Error:', error);
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error('[ElevenLabs] Error obteniendo signed URL:', error);
     return NextResponse.json(
-      { error: error.message || 'Error interno del servidor' },
+      { error: 'Error obteniendo signed URL' },
       { status: 500 }
     );
   }
 }
+
+export const runtime = 'nodejs';
