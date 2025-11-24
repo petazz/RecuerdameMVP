@@ -60,22 +60,37 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
     userName?: string
   ): Promise<string | null> => {
     try {
-      console.log('[ElevenLabs] Obteniendo signed URL...');
+      console.log('[ElevenLabs] Solicitando signed URL para callId:', callId);
       
+      // ✅ CORRECCIÓN: Método GET correcto
       const response = await fetch('/api/elevenlabs/session', {
         method: 'GET',
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Error obteniendo signed URL');
+        const errorData = await response.json().catch(() => ({ error: 'Error desconocido' }));
+        throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
-      console.log('[ElevenLabs] Signed URL obtenida:', data);
+      console.log('[ElevenLabs] Respuesta completa del backend:', data);
       
-      // ✅ CORRECCIÓN: La respuesta viene como "signed_url" (con guión bajo)
-      return data.signed_url;
+      // ✅ CORRECCIÓN: Validar múltiples formatos de respuesta
+      const signedUrl = data.signed_url || data.signedUrl || data.url;
+      
+      if (!signedUrl) {
+        console.error('[ElevenLabs] Respuesta sin signed_url. Data recibida:', data);
+        throw new Error('La respuesta del servidor no contiene signed_url');
+      }
+      
+      // ✅ Validar formato de URL
+      if (!signedUrl.startsWith('wss://')) {
+        console.error('[ElevenLabs] signed_url tiene formato inválido:', signedUrl);
+        throw new Error('signed_url no tiene el formato esperado (debe empezar con wss://)');
+      }
+      
+      console.log('[ElevenLabs] Signed URL obtenida correctamente');
+      return signedUrl;
     } catch (err: any) {
       console.error('[ElevenLabs] Error obteniendo signed URL:', err);
       throw err;
@@ -102,7 +117,7 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
           throw new Error('No se pudo obtener la URL de conexión');
         }
 
-        console.log('[ElevenLabs] Iniciando sesión con signed URL...');
+        console.log('[ElevenLabs] Iniciando sesión con ElevenLabs...');
 
         // 3. Importar dinámicamente el SDK (evita problemas de SSR)
         const ElevenLabs = await import('@elevenlabs/client');

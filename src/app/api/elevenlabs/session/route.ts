@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// ✅ CAMBIO CRÍTICO: De POST a GET
 export async function GET(request: NextRequest) {
   try {
     const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
@@ -22,15 +21,13 @@ export async function GET(request: NextRequest) {
 
     console.log('[ElevenLabs] Obteniendo signed URL para agent:', agentId);
 
-    // ✅ CAMBIO CRÍTICO: URL con query params (no body)
+    // ✅ Endpoint correcto con query params
     const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`;
 
-    // ✅ CAMBIO CRÍTICO: Método GET, sin body, sin Content-Type
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'xi-api-key': apiKey,
-        // NO incluir Content-Type en GET
       },
     });
 
@@ -47,7 +44,14 @@ export async function GET(request: NextRequest) {
     console.log('[ElevenLabs] Signed URL obtenida exitosamente');
     console.log('[ElevenLabs] Response:', data);
     
-    return NextResponse.json(data);
+    // ✅ Retornar con headers CORS
+    return NextResponse.json(data, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      }
+    });
   } catch (error) {
     console.error('[ElevenLabs] Error obteniendo signed URL:', error);
     return NextResponse.json(
@@ -55,6 +59,17 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// ✅ Manejar preflight requests (CORS)
+export async function OPTIONS() {
+  return NextResponse.json({}, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    }
+  });
 }
 
 export const runtime = 'nodejs';
