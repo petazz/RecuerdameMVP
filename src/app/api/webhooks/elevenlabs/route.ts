@@ -104,27 +104,36 @@ function extractTranscriptText(transcript: any): string {
  */
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  console.log('[Webhook] ========================================');
-  console.log('[Webhook] Recibido webhook de ElevenLabs');
+  console.log('');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🔔 [Webhook] WEBHOOK RECIBIDO DE ELEVENLABS');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('[Webhook] Timestamp:', new Date().toISOString());
 
   try {
     // 1. Obtener body raw para verificación
     const rawBody = await request.text();
+    
+    console.log('[Webhook] 📦 Raw body length:', rawBody.length, 'bytes');
     
     // Log de headers para debugging
     const headers: Record<string, string> = {};
     request.headers.forEach((value, key) => {
       headers[key] = value;
     });
-    console.log('[Webhook] Headers recibidos:', JSON.stringify(headers, null, 2));
+    console.log('[Webhook] 📋 Headers recibidos:');
+    console.log(JSON.stringify(headers, null, 2));
 
     // 2. Verificar firma (buscar en varios headers posibles)
     const signature = request.headers.get('x-elevenlabs-signature') 
                    || request.headers.get('x-signature')
                    || request.headers.get('x-webhook-signature');
 
+    console.log('[Webhook] 🔐 Signature presente:', !!signature);
+    console.log('[Webhook] 🔐 Webhook secret configurado:', !!WEBHOOK_SECRET);
+
     if (WEBHOOK_SECRET && !verifyWebhookSignature(rawBody, signature)) {
-      console.error('[Webhook] Firma inválida');
+      console.error('[Webhook] ❌ Firma inválida');
       return NextResponse.json(
         { error: 'Firma inválida' },
         { status: 401 }
@@ -136,39 +145,56 @@ export async function POST(request: NextRequest) {
     try {
       body = JSON.parse(rawBody);
     } catch (parseError) {
-      console.error('[Webhook] Error parseando JSON:', parseError);
+      console.error('[Webhook] ❌ Error parseando JSON:', parseError);
+      console.error('[Webhook] Raw body:', rawBody);
       return NextResponse.json(
         { error: 'JSON inválido' },
         { status: 400 }
       );
     }
 
-    console.log('[Webhook] Tipo de evento:', body.type);
-    console.log('[Webhook] Body recibido:', JSON.stringify(body, null, 2));
+    console.log('[Webhook] 📄 Tipo de evento:', body.type);
+    console.log('[Webhook] 📄 Payload completo:');
+    console.log(JSON.stringify(body, null, 2));
 
     // 4. Extraer conversation_id de ElevenLabs
     const conversationId = body.conversation_id;
 
     if (!conversationId) {
-      console.error('[Webhook] No se encontró conversation_id en el payload');
+      console.error('[Webhook] ❌ No se encontró conversation_id en el payload');
+      console.error('[Webhook] Keys disponibles en body:', Object.keys(body));
       return NextResponse.json(
         { error: 'conversation_id no proporcionado' },
         { status: 400 }
       );
     }
 
-    console.log('[Webhook] Buscando llamada con conversation_id:', conversationId);
+    console.log('[Webhook] 🔑 Conversation ID recibido:', conversationId);
+    console.log('[Webhook] 🔍 Buscando en BD con conversation_id:', conversationId);
+
+    console.log('[Webhook] 🔑 Conversation ID recibido:', conversationId);
+    console.log('[Webhook] 🔍 Buscando en BD con conversation_id:', conversationId);
 
     // 5. Buscar la llamada por elevenlabs_conversation_id
     const { data: callData, error: callError } = await supabase
       .from('calls')
-      .select('id, status, user_id, center_id')
+      .select('id, status, user_id, center_id, elevenlabs_conversation_id')
       .eq('elevenlabs_conversation_id', conversationId)
       .single();
 
     if (callError || !callData) {
-      console.error('[Webhook] Llamada no encontrada para conversation_id:', conversationId);
-      console.error('[Webhook] Error:', callError);
+      console.error('[Webhook] ❌ Llamada NO encontrada para conversation_id:', conversationId);
+      console.error('[Webhook] Error de Supabase:', callError);
+      
+      // Buscar todas las llamadas recientes para debugging
+      const { data: recentCalls } = await supabase
+        .from('calls')
+        .select('id, elevenlabs_conversation_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      console.error('[Webhook] 📋 Últimas 5 llamadas en BD:');
+      console.error(JSON.stringify(recentCalls, null, 2));
       
       // Devolver 200 para que ElevenLabs no reintente
       // pero loguear el error para investigación
@@ -176,18 +202,23 @@ export async function POST(request: NextRequest) {
         success: false,
         message: 'Llamada no encontrada - conversation_id no correlacionado',
         conversation_id: conversationId,
+        recent_calls: recentCalls,
       });
     }
 
-    console.log('[Webhook] Llamada encontrada:', callData.id);
+    console.log('[Webhook] ✅ Llamada encontrada:', callData.id);
+    console.log('[Webhook] 📋 Datos de la llamada:', JSON.stringify(callData, null, 2));
 
     // 6. Extraer y formatear la transcripción
     const transcriptContent = extractTranscriptText(body.transcript);
     
-    console.log('[Webhook] Longitud de transcripción:', transcriptContent.length, 'caracteres');
+    console.log('[Webhook] 📝 Longitud de transcripción:', transcriptContent.length, 'caracteres');
+    console.log('[Webhook] 📝 Preview de transcripción:', transcriptContent.substring(0, 200) + '...');
 
     // 7. Guardar transcripción (upsert por si ya existe)
-    const { error: transcriptError } = await supabase
+    console.log('[Webhook] 💾 Guardando transcripción en BD...');
+    
+    const { data: transcriptData, error: transcriptError } = await supabase
       .from('transcripts')
       .upsert({
         call_id: callData.id,
@@ -202,17 +233,22 @@ export async function POST(request: NextRequest) {
         },
       }, {
         onConflict: 'call_id',
-      });
+      })
+      .select();
 
     if (transcriptError) {
-      console.error('[Webhook] Error guardando transcripción:', transcriptError);
+      console.error('[Webhook] ❌ Error guardando transcripción:', transcriptError);
+      console.error('[Webhook] Error completo:', JSON.stringify(transcriptError, null, 2));
       throw transcriptError;
     }
 
-    console.log('[Webhook] Transcripción guardada correctamente');
+    console.log('[Webhook] ✅ Transcripción guardada correctamente');
+    console.log('[Webhook] 📋 Datos guardados:', JSON.stringify(transcriptData, null, 2));
 
     // 8. Actualizar estado de la llamada si no está completada
     if (callData.status !== 'completed') {
+      console.log('[Webhook] 🔄 Actualizando estado de llamada a "completed"...');
+      
       const { error: updateError } = await supabase
         .from('calls')
         .update({
@@ -222,15 +258,16 @@ export async function POST(request: NextRequest) {
         .eq('id', callData.id);
 
       if (updateError) {
-        console.error('[Webhook] Error actualizando estado de llamada:', updateError);
+        console.error('[Webhook] ❌ Error actualizando estado de llamada:', updateError);
       } else {
-        console.log('[Webhook] Llamada marcada como completada');
+        console.log('[Webhook] ✅ Llamada marcada como completada');
       }
     }
 
     const processingTime = Date.now() - startTime;
-    console.log('[Webhook] Procesamiento completado en', processingTime, 'ms');
-    console.log('[Webhook] ========================================');
+    console.log('[Webhook] ⏱️  Procesamiento completado en', processingTime, 'ms');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
 
     return NextResponse.json({
       success: true,
@@ -241,8 +278,11 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (err: any) {
-    console.error('[Webhook] Error procesando webhook:', err);
+    console.error('[Webhook] ❌❌❌ ERROR PROCESANDO WEBHOOK ❌❌❌');
+    console.error('[Webhook] Error:', err);
     console.error('[Webhook] Stack:', err.stack);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
     
     return NextResponse.json(
       { 

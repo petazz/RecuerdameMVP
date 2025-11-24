@@ -95,22 +95,29 @@ export function useCallSession(userId: string): UseCallSessionReturn {
    */
   const updateCallWithConversationId = async (callId: string, convId: string) => {
     try {
-      console.log('[CallSession] Guardando conversation_id en BD:', convId);
+      console.log('[CallSession] ========================================');
+      console.log('[CallSession] 🔑 GUARDANDO CONVERSATION_ID EN BD');
+      console.log('[CallSession] - Call ID:', callId);
+      console.log('[CallSession] - Conversation ID:', convId);
+      console.log('[CallSession] ========================================');
       
-      const { error: updateError } = await supabase
+      const { data, error: updateError } = await supabase
         .from('calls')
         .update({ 
           elevenlabs_conversation_id: convId,
         })
-        .eq('id', callId);
+        .eq('id', callId)
+        .select();
 
       if (updateError) {
-        console.error('[CallSession] Error guardando conversation_id:', updateError);
+        console.error('[CallSession] ❌ Error guardando conversation_id:', updateError);
+        console.error('[CallSession] Error completo:', JSON.stringify(updateError, null, 2));
       } else {
-        console.log('[CallSession] conversation_id guardado correctamente');
+        console.log('[CallSession] ✅ conversation_id guardado correctamente');
+        console.log('[CallSession] Datos actualizados:', data);
       }
     } catch (err) {
-      console.error('[CallSession] Error en updateCallWithConversationId:', err);
+      console.error('[CallSession] ❌ Error en updateCallWithConversationId:', err);
     }
   };
 
@@ -228,6 +235,12 @@ export function useCallSession(userId: string): UseCallSessionReturn {
         callId,
         userId,
       });
+
+      // 3. CRÍTICO: Guardar conversation_id inmediatamente después de conectar
+      if (elevenLabsConvId) {
+        console.log('[CallSession] 🔑 Guardando conversation_id inmediatamente después de connect...');
+        await updateCallWithConversationId(callId, elevenLabsConvId);
+      }
 
       if (!elevenLabsConvId) {
         // La conexión falló, marcar llamada como fallida
