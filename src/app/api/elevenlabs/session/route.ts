@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
     const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -19,7 +19,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Obtener parámetros del body
+    const body = await request.json();
+    const { callId, userId, userName } = body;
+
     console.log('[ElevenLabs] Obteniendo signed URL para agent:', agentId);
+    console.log('[ElevenLabs] CallId:', callId, 'UserId:', userId, 'UserName:', userName);
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/convai/agents/${agentId}/signed-url`,
