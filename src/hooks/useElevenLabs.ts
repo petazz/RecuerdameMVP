@@ -61,12 +61,11 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
    */
   const getSignedUrl = async (callId: string, userId?: string, userName?: string): Promise<string | null> => {
     try {
-      console.log('[ElevenLabs] Obteniendo signed URL para callId:', callId);
+      console.log('[ElevenLabs] Obteniendo signed URL...');
+      // Nota: callId, userId, userName ya no se envían al backend (endpoint usa agent_id de .env)
       
       const response = await fetch('/api/elevenlabs/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callId, userId, userName }),
+        method: 'GET',
       });
 
       if (!response.ok) {
