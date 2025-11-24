@@ -61,21 +61,70 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
   ): Promise<string | null> => {
     try {
       console.log('[ElevenLabs] Solicitando signed URL para callId:', callId);
+      console.log('[ElevenLabs] Endpoint:', '/api/elevenlabs/session');
       
-      // ✅ CORRECCIÓN: Método GET correcto
       const response = await fetch('/api/elevenlabs/session', {
         method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
       
+      console.log('[ElevenLabs] Response status:', response.status);
+      console.log('[ElevenLabs] Response ok:', response.ok);
+      console.log('[ElevenLabs] Response statusText:', response.statusText);
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Error desconocido' }));
-        throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
+        // Intentar obtener el error detallado
+        const contentType = response.headers.get('content-type');
+        let errorDetail = `HTTP ${response.status}: ${response.statusText}`;
+        
+        console.log('[ElevenLabs] Content-Type:', contentType);
+        
+        if (contentType?.includes('application/json')) {
+          try {
+            const errorData = await response.json();
+            console.error('[ElevenLabs] Error JSON del servidor:', errorData);
+            console.error('[ElevenLabs] Error completo:', JSON.stringify(errorData, null, 2));
+            
+            // Parsear el detail si es un string JSON anidado
+            let parsedDetail = errorData.detail;
+            if (typeof errorData.detail === 'string') {
+              try {
+                parsedDetail = JSON.parse(errorData.detail);
+                console.error('[ElevenLabs] Detail parseado:', parsedDetail);
+              } catch (e) {
+                // No es JSON, usar como string
+              }
+            }
+            
+            // Extraer mensaje específico si existe
+            if (parsedDetail?.detail?.message) {
+              errorDetail = `ElevenLabs: ${parsedDetail.detail.message}`;
+            } else {
+              errorDetail = errorData.error || errorData.detail || errorData.message || errorDetail;
+            }
+            
+            // Mensaje específico para error 401
+            if (response.status === 401) {
+              errorDetail = '❌ API Key de ElevenLabs inválida. Por favor verifica tu ELEVENLABS_API_KEY en .env.local';
+            }
+          } catch (e) {
+            console.error('[ElevenLabs] No se pudo parsear error JSON');
+          }
+        } else {
+          const errorText = await response.text();
+          console.error('[ElevenLabs] Error texto del servidor:', errorText);
+          if (errorText) errorDetail = errorText;
+        }
+        
+        throw new Error(errorDetail);
       }
       
       const data = await response.json();
       console.log('[ElevenLabs] Respuesta completa del backend:', data);
       
-      // ✅ CORRECCIÓN: Validar múltiples formatos de respuesta
+      // Validar múltiples formatos de respuesta
       const signedUrl = data.signed_url || data.signedUrl || data.url;
       
       if (!signedUrl) {
@@ -83,7 +132,7 @@ export function useElevenLabs(config?: UseElevenLabsConfig): UseElevenLabsReturn
         throw new Error('La respuesta del servidor no contiene signed_url');
       }
       
-      // ✅ Validar formato de URL
+      // Validar formato de URL
       if (!signedUrl.startsWith('wss://')) {
         console.error('[ElevenLabs] signed_url tiene formato inválido:', signedUrl);
         throw new Error('signed_url no tiene el formato esperado (debe empezar con wss://)');
