@@ -26,14 +26,18 @@ export async function POST(request: NextRequest) {
     console.log('[ElevenLabs] Obteniendo signed URL para agent:', agentId);
     console.log('[ElevenLabs] CallId:', callId, 'UserId:', userId, 'UserName:', userName);
 
+    // ✅ ENDPOINT CORRECTO: POST a /v1/convai/conversation/get_signed_url
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/agents/${agentId}/signed-url`,
+      'https://api.elevenlabs.io/v1/convai/conversation/get_signed_url',
       {
-        method: 'GET',
+        method: 'POST',  // ✅ Cambiado de GET a POST
         headers: {
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          agent_id: agentId,  // ✅ Agent ID va en el body, no en la URL
+        }),
       }
     );
 
@@ -41,14 +45,14 @@ export async function POST(request: NextRequest) {
       const error = await response.text();
       console.error('[ElevenLabs] Error:', response.status, error);
       return NextResponse.json(
-        { error: `ElevenLabs error: ${response.status}` },
+        { error: `ElevenLabs error: ${response.status}`, detail: error },
         { status: response.status }
       );
     }
 
     const data = await response.json();
     console.log('[ElevenLabs] Signed URL obtenida exitosamente');
-
+    
     return NextResponse.json(data);
   } catch (error) {
     console.error('[ElevenLabs] Error obteniendo signed URL:', error);
