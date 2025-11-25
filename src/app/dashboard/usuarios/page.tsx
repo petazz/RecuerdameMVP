@@ -39,7 +39,6 @@ export default function UsuariosPage() {
   
   // Modales
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
@@ -300,8 +299,7 @@ export default function UsuariosPage() {
                 <thead className="bg-gray-100 border-b-2 border-gray-200">
                   <tr>
                     <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Nombre</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Llamadas Hoy</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Última Llamada</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Creado</th>
                     <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Acciones</th>
                   </tr>
                 </thead>
@@ -313,12 +311,11 @@ export default function UsuariosPage() {
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-base text-gray-600">
-                          {user.calls_today || 0} / ∞
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-base text-gray-600">
-                          {user.last_call ? new Date(user.last_call).toLocaleString('es-ES') : 'Nunca'}
+                          {new Date(user.created_at).toLocaleDateString('es-ES', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric'
+                          })}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -333,10 +330,7 @@ export default function UsuariosPage() {
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowViewModal(true);
-                            }}
+                            onClick={() => router.push(`/dashboard/usuarios/${user.id}`)}
                           >
                             Ver
                           </Button>
@@ -453,36 +447,6 @@ export default function UsuariosPage() {
             <code className="block px-4 py-3 bg-gray-100 rounded-lg text-sm break-all">
               {generatedUrl}
             </code>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal: Ver Usuario */}
-      <Modal
-        isOpen={showViewModal}
-        onClose={() => setShowViewModal(false)}
-        title={selectedUser?.full_name || 'Usuario'}
-        footer={
-          <>
-            <Button variant="secondary" size="md" onClick={() => setShowViewModal(false)}>
-              Cerrar
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-6">
-          <div>
-            <p className="text-base text-gray-600 mb-2">Enlace de acceso:</p>
-            <code className="block px-4 py-3 bg-gray-100 rounded-lg text-sm break-all">
-              {selectedUser && getUserUrl(selectedUser.login_token)}
-            </code>
-          </div>
-          
-          <div>
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Historial de Llamadas</h3>
-            <p className="text-base text-gray-600">
-              No hay llamadas registradas aún.
-            </p>
           </div>
         </div>
       </Modal>
