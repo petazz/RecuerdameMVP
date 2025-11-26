@@ -50,13 +50,56 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
   }
 
   try {
-    // OPCIÓN 1: Comparación directa (más común en ElevenLabs)
+    // MÉTODO 1: Formato ElevenLabs con timestamp (t=xxx,v0=xxx)
+    if (signature.includes('t=') && signature.includes('v0=')) {
+      console.log('[Webhook] Detectado formato ElevenLabs (timestamp)');
+      
+      // Parsear la firma: t=1234567890,v0=abc123...
+      const parts = signature.split(',');
+      let timestamp = '';
+      let signatureHash = '';
+      
+      for (const part of parts) {
+        if (part.startsWith('t=')) {
+          timestamp = part.substring(2);
+        } else if (part.startsWith('v0=')) {
+          signatureHash = part.substring(3);
+        }
+      }
+      
+      if (!timestamp || !signatureHash) {
+        console.warn('[Webhook] Formato de firma inválido');
+        return false;
+      }
+      
+      // Crear el payload firmado: timestamp.body
+      const signedPayload = `${timestamp}.${payload}`;
+      
+      // Calcular HMAC SHA256
+      const expectedSignature = crypto
+        .createHmac('sha256', WEBHOOK_SECRET)
+        .update(signedPayload)
+        .digest('hex');
+      
+      // Comparar
+      if (signatureHash === expectedSignature) {
+        console.log('[Webhook] ✅ Firma verificada (ElevenLabs timestamp)');
+        return true;
+      }
+      
+      console.warn('[Webhook] Firma no coincide (ElevenLabs timestamp)');
+      console.warn('[Webhook] Esperado:', expectedSignature.substring(0, 20) + '...');
+      console.warn('[Webhook] Recibido:', signatureHash.substring(0, 20) + '...');
+      return false;
+    }
+    
+    // MÉTODO 2: Comparación directa (webhook personalizado)
     if (signature === WEBHOOK_SECRET) {
       console.log('[Webhook] ✅ Firma verificada (comparación directa)');
       return true;
     }
 
-    // OPCIÓN 2: Intentar con HMAC SHA256 (por si acaso)
+    // MÉTODO 3: HMAC SHA256 simple (sin timestamp)
     const expectedSignature = crypto
       .createHmac('sha256', WEBHOOK_SECRET)
       .update(payload)
