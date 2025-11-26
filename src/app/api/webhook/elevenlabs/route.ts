@@ -129,9 +129,10 @@ export async function POST(request: NextRequest) {
     console.log(JSON.stringify(headers, null, 2));
 
     // 2. Verificar firma (buscar en varios headers posibles)
-    const signature = request.headers.get('x-elevenlabs-signature') 
-                   || request.headers.get('x-signature')
-                   || request.headers.get('x-webhook-signature');
+const signature = request.headers.get('elevenlabs-signature')      // ← NUEVO: sin x-
+               || request.headers.get('x-elevenlabs-signature')   
+               || request.headers.get('x-signature')
+               || request.headers.get('x-webhook-signature');
 
     console.log('[Webhook] 🔐 Signature presente:', !!signature);
     console.log('[Webhook] 🔐 Webhook secret configurado:', !!WEBHOOK_SECRET);
