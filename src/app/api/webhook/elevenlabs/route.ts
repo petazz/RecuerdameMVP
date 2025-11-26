@@ -206,7 +206,8 @@ const signature = request.headers.get('elevenlabs-signature')      // ← NUEVO:
     console.log(JSON.stringify(body, null, 2));
 
     // 4. Extraer conversation_id de ElevenLabs
-    const conversationId = body.conversation_id;
+// ElevenLabs puede enviar el conversation_id en diferentes lugares
+const conversationId = body.data?.conversation_id || body.conversation_id;
 
     if (!conversationId) {
       console.error('[Webhook] ❌ No se encontró conversation_id en el payload');
@@ -258,7 +259,8 @@ const signature = request.headers.get('elevenlabs-signature')      // ← NUEVO:
     console.log('[Webhook] 📋 Datos de la llamada:', JSON.stringify(callData, null, 2));
 
     // 6. Extraer y formatear la transcripción
-    const transcriptContent = extractTranscriptText(body.transcript);
+   const transcript = body.data?.transcript || body.transcript;
+const transcriptContent = extractTranscriptText(transcript);
     
     console.log('[Webhook] 📝 Longitud de transcripción:', transcriptContent.length, 'caracteres');
     console.log('[Webhook] 📝 Preview de transcripción:', transcriptContent.substring(0, 200) + '...');
@@ -271,13 +273,15 @@ const signature = request.headers.get('elevenlabs-signature')      // ← NUEVO:
       .upsert({
         call_id: callData.id,
         content: transcriptContent,
-        metadata: {
+          metadata: {
           conversation_id: conversationId,
-          agent_id: body.agent_id,
-          status: body.status,
+          agent_id: body.data?.agent_id || body.agent_id,
+          status: body.data?.status || body.status,
           type: body.type,
-          analysis: body.analysis || null,
+          analysis: body.data?.analysis || body.analysis || null,
           received_at: new Date().toISOString(),
+          call_duration_secs: body.data?.metadata?.call_duration_secs || null,
+          call_summary: body.data?.analysis?.call_summary_title || null,
         },
       }, {
         onConflict: 'call_id',
