@@ -50,22 +50,26 @@ function verifyWebhookSignature(payload: string, signature: string | null): bool
   }
 
   try {
-    // ElevenLabs puede enviar la firma en diferentes formatos
-    // Intentamos verificar con HMAC SHA256
+    // OPCIÓN 1: Comparación directa (más común en ElevenLabs)
+    if (signature === WEBHOOK_SECRET) {
+      console.log('[Webhook] ✅ Firma verificada (comparación directa)');
+      return true;
+    }
+
+    // OPCIÓN 2: Intentar con HMAC SHA256 (por si acaso)
     const expectedSignature = crypto
       .createHmac('sha256', WEBHOOK_SECRET)
       .update(payload)
       .digest('hex');
 
-    // Comparación segura contra timing attacks
-    const sigBuffer = Buffer.from(signature.replace('sha256=', ''), 'hex');
-    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
-
-    if (sigBuffer.length !== expectedBuffer.length) {
-      return false;
+    if (signature === expectedSignature || signature === `sha256=${expectedSignature}`) {
+      console.log('[Webhook] ✅ Firma verificada (HMAC SHA256)');
+      return true;
     }
 
-    return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+    console.warn('[Webhook] ❌ Firma no coincide con ningún método');
+    return false;
+
   } catch (err) {
     console.error('[Webhook] Error verificando firma:', err);
     return false;
