@@ -7,28 +7,20 @@ import { UserNotFound } from '@/components/UserNotFound';
 
 /**
  * Página principal para usuarios finales
- * Acceso mediante token único en la URL: /usuario/[token]
- * Interfaz minimalista y accesible para personas mayores
- * 
- * FLUJO:
- * 1. Obtener token de la URL
- * 2. Validar token con hook useUserValidation
- * 3. Si válido: mostrar CallInterface
- * 4. Si inválido: mostrar UserNotFound
+ * Acceso mediante token único en la URL: /u/[token]
  */
 export default function UserSessionPage() {
   const params = useParams();
   const token = params?.token as string;
 
-  // Hook personalizado para validación de token
+  // Hook para validación de token (usa endpoint con rate limiting)
   const { loading, valid, userData, error } = useUserValidation(token);
 
-  // Estado de carga: Mostrar spinner grande
+  // Estado de carga
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="text-center space-y-8">
-          {/* Spinner grande y visible para personas mayores */}
           <svg
             className="animate-spin h-24 w-24 mx-auto text-blue-600"
             xmlns="http://www.w3.org/2000/svg"
@@ -62,16 +54,20 @@ export default function UserSessionPage() {
     );
   }
 
-  // Token inválido o error: Mostrar página de error
+  // Token inválido o error
   if (!valid || !userData) {
     return <UserNotFound message={error || 'Enlace no válido o expirado'} />;
   }
 
   // Token válido: Mostrar interfaz de llamada
+  // ✅ AHORA PASAMOS loginToken
   return (
     <CallInterface
       userName={userData.full_name}
       userId={userData.id}
+      loginToken={token}
+      initialCallsToday={userData.callsToday}
+      initialCanStart={userData.canStart}
     />
   );
 }
