@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/utils/supabase/client';
 
 interface UserData {
   id: string;
   full_name: string;
-  center_id: string;
+  canStart: boolean;
+  callsToday: number;
 }
 
 interface ValidationState {
@@ -15,13 +15,10 @@ interface ValidationState {
 }
 
 /**
- * Hook personalizado para validar token de usuario y obtener sus datos
+ * Hook para validar token de usuario usando el endpoint con rate limiting
  * 
  * @param token - Token único del usuario desde la URL
  * @returns Estado de validación con datos del usuario o error
- * 
- * @example
- * const { loading, valid, userData, error } = useUserValidation(token);
  */
 export function useUserValidation(token: string | null): ValidationState {
   const [state, setState] = useState<ValidationState>({
@@ -32,7 +29,6 @@ export function useUserValidation(token: string | null): ValidationState {
   });
 
   useEffect(() => {
-    // No validar si no hay token
     if (!token) {
       setState({
         loading: false,
@@ -44,72 +40,57 @@ export function useUserValidation(token: string | null): ValidationState {
     }
 
     validateToken();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  /**
-   * Valida el token contra la base de datos de Supabase
-   * 
-   * Lógica robusta:
-   * 1. Solo marca error si hay un error REAL con mensaje/details
-   * 2. Si data existe, el token es válido independientemente del objeto error
-   * 3. Si data es null/undefined, el usuario no existe con ese token
-   */
   const validateToken = async () => {
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      // Consultar usuario por login_token
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, full_name, center_id')
-        .eq('login_token', token)
-        .single();
-
-      // CASO 1: Tenemos datos del usuario → Token válido
-      if (data) {
-        setState({
-          loading: false,
-          valid: true,
-          userData: data,
-          error: null,
-        });
-        return;
-      }
-
-      // CASO 2: Error real con mensaje/details → Error de conexión o permisos
-      if (error && (error.message || error.details || error.hint)) {
-        // Solo loguear si es un error real, no el error PGRST116 (no rows)
-        if (error.code !== 'PGRST116') {
-          console.error('Error validando token:', error);
-        }
-        
+      // Usar el nuevo endpoint con rate limiting
+      const response = await fetch(`/api/public/users/validate?token=${encodeURIComponent(token!)}`);
+      
+      // Manejar rate limiting
+      if (response.status === 429) {
+        const data = await response.json();
         setState({
           loading: false,
           valid: false,
           userData: null,
-          error: error.code === 'PGRST116' 
-            ? 'No existe ningún usuario con ese token'
-            : error.message || 'Error al validar el enlace',
+          error: `Por favor, espera ${data.retryAfter || 60} segundos antes de intentar de nuevo`,
         });
         return;
       }
 
-      // CASO 3: No hay data ni error real → Usuario no existe
-      setState({
-        loading: false,
-        valid: false,
-        userData: null,
-        error: 'No existe ningún usuario con ese token',
-      });
+      const data = await response.json();
+
+      if (data.valid) {
+        setState({
+          loading: false,
+          valid: true,
+          userData: {
+            id: data.userId,
+            full_name: data.userName,
+            canStart: data.canStart,
+            callsToday: data.callsToday,
+          },
+          error: null,
+        });
+      } else {
+        setState({
+          loading: false,
+          valid: false,
+          userData: null,
+          error: 'Enlace no válido o expirado',
+        });
+      }
 
     } catch (err: any) {
-      console.error('Error inesperado:', err);
+      console.error('Error validando token:', err);
       setState({
         loading: false,
         valid: false,
         userData: null,
-        error: err.message || 'Error al validar el enlace',
+        error: 'Error al validar el enlace',
       });
     }
   };

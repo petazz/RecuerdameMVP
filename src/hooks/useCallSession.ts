@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { supabase } from '@/utils/supabase/client';
 import { useElevenLabs } from '@/hooks/useElevenLabs';
 
 type CallState = 'ready' | 'connecting' | 'calling' | 'ended' | 'error';
@@ -21,14 +20,12 @@ interface UseCallSessionReturn {
 /**
  * Hook para manejar sesiones de llamada con ElevenLabs
  * 
- * FLUJO DE CORRELACIÓN:
- * 1. Crear registro 'calls' en BD con status='started'
- * 2. Conectar con ElevenLabs y obtener conversation_id
- * 3. Guardar conversation_id en el registro 'calls'
- * 4. Cuando ElevenLabs envía webhook, buscar por conversation_id
- * 5. Guardar transcripción vinculada a la llamada
+ * Usa los endpoints del backend para:
+ * - Rate limiting
+ * - Validación centralizada
+ * - Creación/actualización de llamadas
  */
-export function useCallSession(userId: string): UseCallSessionReturn {
+export function useCallSession(userId: string, loginToken?: string): UseCallSessionReturn {
   const [callState, setCallState] = useState<CallState>('ready');
   const [callDuration, setCallDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +55,7 @@ export function useCallSession(userId: string): UseCallSessionReturn {
     },
     onConnect: async (convId) => {
       console.log('[CallSession] Conectado con conversation_id:', convId);
-      // Guardar conversation_id en la BD para correlación con webhook
+      // Guardar conversation_id en el backend
       if (currentCallId && convId) {
         await updateCallWithConversationId(currentCallId, convId);
       }
@@ -70,8 +67,10 @@ export function useCallSession(userId: string): UseCallSessionReturn {
 
   // Verificar límite diario al montar
   useEffect(() => {
-    checkDailyLimit();
-  }, [userId]);
+    if (loginToken) {
+      checkDailyLimit();
+    }
+  }, [userId, loginToken]);
 
   // Sincronizar estado de conexión
   useEffect(() => {
@@ -82,7 +81,7 @@ export function useCallSession(userId: string): UseCallSessionReturn {
     }
   }, [isConnected, isConnecting]);
 
-  // Sincronizar errores de ElevenLabs
+  // Sincronizar errores
   useEffect(() => {
     if (elevenLabsError) {
       setError(elevenLabsError);
@@ -90,88 +89,52 @@ export function useCallSession(userId: string): UseCallSessionReturn {
   }, [elevenLabsError]);
 
   /**
-   * Actualiza el registro de llamada con el conversation_id de ElevenLabs
-   * Esto es CRÍTICO para correlacionar el webhook
+   * Actualiza el conversation_id usando el endpoint del backend
    */
   const updateCallWithConversationId = async (callId: string, convId: string) => {
     try {
-      console.log('[CallSession] ========================================');
-      console.log('[CallSession] 🔑 GUARDANDO CONVERSATION_ID EN BD');
-      console.log('[CallSession] - Call ID:', callId);
-      console.log('[CallSession] - Conversation ID:', convId);
-      console.log('[CallSession] ========================================');
+      console.log('[CallSession] 🔑 Guardando conversation_id...');
       
-      const { data, error: updateError } = await supabase
-        .from('calls')
-        .update({ 
-          elevenlabs_conversation_id: convId,
-        })
-        .eq('id', callId)
-        .select();
+      const response = await fetch(`/api/calls/${callId}/conversation`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: convId }),
+      });
 
-      if (updateError) {
-        console.error('[CallSession] ❌ Error guardando conversation_id:', updateError);
-        console.error('[CallSession] Error completo:', JSON.stringify(updateError, null, 2));
+      if (!response.ok) {
+        console.error('[CallSession] Error guardando conversation_id');
       } else {
-        console.log('[CallSession] ✅ conversation_id guardado correctamente');
-        console.log('[CallSession] Datos actualizados:', data);
+        console.log('[CallSession] ✅ conversation_id guardado');
       }
     } catch (err) {
-      console.error('[CallSession] ❌ Error en updateCallWithConversationId:', err);
+      console.error('[CallSession] Error:', err);
     }
   };
 
   /**
-   * Verifica el límite de 2 llamadas por día según timezone del centro
+   * Verifica el límite diario usando el endpoint del backend
    */
   const checkDailyLimit = async () => {
+    if (!loginToken) return;
+
     try {
-      // 1. Obtener timezone del centro
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('center_id, centers(timezone)')
-        .eq('id', userId)
-        .single();
-
-      if (userError) {
-        console.error('[CallSession] Error obteniendo usuario:', userError);
+      const response = await fetch(`/api/public/users/validate?token=${encodeURIComponent(loginToken)}`);
+      
+      if (response.status === 429) {
+        setError('Demasiados intentos. Por favor, espera un momento.');
+        setCanStartCall(false);
         return;
       }
 
-      const timezone = (userData?.centers as any)?.timezone || 'Europe/Madrid';
+      const data = await response.json();
 
-      // 2. Calcular inicio del día en timezone del centro
-      const now = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-      const todayStr = formatter.format(now);
-      const startOfDay = new Date(`${todayStr}T00:00:00`);
-
-      // 3. Contar llamadas del día
-      const { data: calls, error: callsError } = await supabase
-        .from('calls')
-        .select('id')
-        .eq('user_id', userId)
-        .in('status', ['started', 'completed'])
-        .gte('started_at', startOfDay.toISOString());
-
-      if (callsError) {
-        console.error('[CallSession] Error contando llamadas:', callsError);
-        return;
-      }
-
-      const todayCount = calls?.length || 0;
-      setCallsToday(todayCount);
-      setCanStartCall(todayCount < 2);
-
-      console.log('[CallSession] Llamadas hoy:', todayCount, '- Puede llamar:', todayCount < 2);
-
-      if (todayCount >= 2) {
-        setError('Has alcanzado el límite de 2 llamadas por día');
+      if (data.valid) {
+        setCallsToday(data.callsToday);
+        setCanStartCall(data.canStart);
+        
+        if (!data.canStart) {
+          setError('Has alcanzado el límite de 2 llamadas por día');
+        }
       }
     } catch (err: any) {
       console.error('[CallSession] Error verificando límite:', err);
@@ -179,84 +142,74 @@ export function useCallSession(userId: string): UseCallSessionReturn {
   };
 
   /**
-   * Obtiene el center_id del usuario
-   */
-  const getUserCenterId = async (): Promise<string> => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('center_id')
-      .eq('id', userId)
-      .single();
-
-    if (error) throw error;
-    return data.center_id;
-  };
-
-  /**
    * Inicia una nueva llamada
    */
   const startCall = useCallback(async () => {
+    if (!loginToken) {
+      setError('Token no disponible');
+      return;
+    }
+
     try {
       setError(null);
 
-      // Verificar límite
       if (!canStartCall) {
         setError('Has alcanzado el límite de 2 llamadas por día');
         return;
       }
 
-      console.log('[CallSession] Iniciando llamada para usuario:', userId);
+      console.log('[CallSession] Iniciando llamada...');
       setCallState('connecting');
 
-      // 1. Crear registro de llamada en BD
-      const centerId = await getUserCenterId();
-      const { data: callData, error: callError } = await supabase
-        .from('calls')
-        .insert([{
-          user_id: userId,
-          center_id: centerId,
-          started_at: new Date().toISOString(),
-          status: 'started',
-        }])
-        .select()
-        .single();
+      // 1. Crear llamada en el backend
+      const startResponse = await fetch('/api/calls/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginToken }),
+      });
 
-      if (callError) {
-        console.error('[CallSession] Error creando llamada:', callError);
-        throw callError;
+      // Manejar rate limiting
+      if (startResponse.status === 429) {
+        const data = await startResponse.json();
+        setError(`Por favor, espera ${data.retryAfter || 60} segundos`);
+        setCallState('error');
+        return;
       }
 
-      const callId = callData.id;
+      const startData = await startResponse.json();
+
+      if (!startData.success) {
+        setError(startData.error || 'No se pudo iniciar la llamada');
+        setCallState('error');
+        return;
+      }
+
+      const callId = startData.callId;
       setCurrentCallId(callId);
       console.log('[CallSession] Call ID creado:', callId);
 
-      // 2. Conectar con ElevenLabs (pasando callId para referencia)
+      // 2. Conectar con ElevenLabs
       const elevenLabsConvId = await connect({ 
         callId,
         userId,
       });
 
-      // 3. CRÍTICO: Guardar conversation_id inmediatamente después de conectar
-      if (elevenLabsConvId) {
-        console.log('[CallSession] 🔑 Guardando conversation_id inmediatamente después de connect...');
-        await updateCallWithConversationId(callId, elevenLabsConvId);
-      }
-
       if (!elevenLabsConvId) {
-        // La conexión falló, marcar llamada como fallida
-        await supabase
-          .from('calls')
-          .update({ 
-            status: 'failed', 
-            ended_at: new Date().toISOString() 
-          })
-          .eq('id', callId);
+        // Marcar llamada como fallida
+        await fetch('/api/calls/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callId }),
+        });
         
         setCallState('error');
         return;
       }
 
-      // 3. Iniciar contador de duración
+      // 3. Guardar conversation_id
+      await updateCallWithConversationId(callId, elevenLabsConvId);
+
+      // 4. Iniciar contador
       startTimeRef.current = new Date();
       intervalRef.current = setInterval(() => {
         if (startTimeRef.current) {
@@ -265,20 +218,20 @@ export function useCallSession(userId: string): UseCallSessionReturn {
         }
       }, 1000);
 
-      // 4. Actualizar contadores
-      setCallsToday(prev => prev + 1);
-      if (callsToday + 1 >= 2) {
+      // 5. Actualizar contadores
+      setCallsToday(startData.callsToday);
+      if (startData.callsToday >= 2) {
         setCanStartCall(false);
       }
 
       setCallState('calling');
 
     } catch (err: any) {
-      console.error('[CallSession] Error al iniciar llamada:', err);
+      console.error('[CallSession] Error:', err);
       setError(err.message || 'Error al iniciar la llamada');
       setCallState('error');
     }
-  }, [userId, canStartCall, connect, callsToday]);
+  }, [userId, loginToken, canStartCall, connect]);
 
   /**
    * Finaliza la llamada actual
@@ -296,41 +249,37 @@ export function useCallSession(userId: string): UseCallSessionReturn {
       // 2. Desconectar ElevenLabs
       await disconnect();
 
-      // 3. Calcular duración final
+      // 3. Calcular duración
       const finalDuration = startTimeRef.current
         ? Math.floor((Date.now() - startTimeRef.current.getTime()) / 1000)
         : callDuration;
 
-      // 4. Actualizar registro en BD
+      // 4. Finalizar en backend
       if (currentCallId) {
-        const { error: updateError } = await supabase
-          .from('calls')
-          .update({
-            status: 'completed',
-            ended_at: new Date().toISOString(),
-            duration_seconds: finalDuration,
-          })
-          .eq('id', currentCallId);
-
-        if (updateError) {
-          console.error('[CallSession] Error actualizando llamada:', updateError);
-        }
+        await fetch('/api/calls/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            callId: currentCallId,
+            elevenlabsConversationId: conversationId,
+          }),
+        });
       }
 
       setCallState('ended');
       setCallDuration(finalDuration);
 
     } catch (err: any) {
-      console.error('[CallSession] Error al finalizar llamada:', err);
+      console.error('[CallSession] Error al finalizar:', err);
       setError('Error al finalizar la llamada');
     }
-  }, [disconnect, currentCallId, callDuration]);
+  }, [disconnect, currentCallId, callDuration, conversationId]);
 
   /**
-   * Reinicia la interfaz para nueva llamada
+   * Reinicia para nueva llamada
    */
   const resetCall = useCallback(() => {
-    console.log('[CallSession] Reiniciando interfaz');
+    console.log('[CallSession] Reiniciando');
 
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -343,11 +292,13 @@ export function useCallSession(userId: string): UseCallSessionReturn {
     setError(null);
     startTimeRef.current = null;
 
-    // Verificar límite de nuevo
-    checkDailyLimit();
-  }, []);
+    // Verificar límite
+    if (loginToken) {
+      checkDailyLimit();
+    }
+  }, [loginToken]);
 
-  // Cleanup al desmontar
+  // Cleanup
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
