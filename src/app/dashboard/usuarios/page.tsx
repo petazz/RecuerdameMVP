@@ -17,8 +17,9 @@ interface User {
   login_token: string;
   center_id: string;
   created_at: string;
-  calls_today?: number;
-  last_call?: string;
+  // Campos para estadísticas
+  calls_today: number;
+  last_call_at: string | null;
 }
 
 interface Profile {
@@ -96,19 +97,78 @@ export default function UsuariosPage() {
     }
   };
 
+  /**
+   * Obtiene usuarios con estadísticas de llamadas
+   */
   const fetchUsers = async (centerId: string) => {
     try {
-      const { data, error } = await supabase
+      // 1. Obtener usuarios del centro
+      const { data: usersData, error: usersError } = await supabase
         .from('users')
         .select('*')
         .eq('center_id', centerId)
         .order('created_at', { ascending: false })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-      if (error) throw error;
+      if (usersError) throw usersError;
 
-      setUsers(data || []);
-      setHasMore((data || []).length === PAGE_SIZE);
+      // 2. Obtener timezone del centro para calcular "hoy"
+      const { data: centerData } = await supabase
+        .from('centers')
+        .select('timezone')
+        .eq('id', centerId)
+        .single();
+
+      const timezone = centerData?.timezone || 'Europe/Madrid';
+
+      // 3. Calcular inicio del día en el timezone del centro
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      const todayStr = formatter.format(now);
+      const startOfDayLocal = new Date(`${todayStr}T00:00:00`);
+      
+      // Convertir a UTC
+      const tempDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+      const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+      const offsetMs = utcDate.getTime() - tempDate.getTime();
+      const startOfDayUTC = new Date(startOfDayLocal.getTime() + offsetMs);
+
+      // 4. Enriquecer usuarios con estadísticas
+      const enrichedUsers = await Promise.all(
+        (usersData || []).map(async (user) => {
+          // Contar llamadas de hoy
+          const { data: todayCalls } = await supabase
+            .from('calls')
+            .select('id', { count: 'exact' })
+            .eq('user_id', user.id)
+            .in('status', ['started', 'completed'])
+            .gte('started_at', startOfDayUTC.toISOString());
+
+          // Obtener última llamada
+          const { data: lastCall } = await supabase
+            .from('calls')
+            .select('started_at')
+            .eq('user_id', user.id)
+            .in('status', ['started', 'completed'])
+            .order('started_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          return {
+            ...user,
+            calls_today: todayCalls?.length || 0,
+            last_call_at: lastCall?.started_at || null,
+          };
+        })
+      );
+
+      setUsers(enrichedUsers);
+      setHasMore((usersData || []).length === PAGE_SIZE);
     } catch (err: any) {
       showToast(err.message || 'Error al cargar usuarios', 'error');
     }
@@ -150,7 +210,7 @@ export default function UsuariosPage() {
 
       const url = `${window.location.origin}/u/${token}`;
       setGeneratedUrl(url);
-      setSelectedUser(data);
+      setSelectedUser({ ...data, calls_today: 0, last_call_at: null });
       
       showToast('Usuario creado exitosamente', 'success');
       setNewUserName('');
@@ -235,6 +295,31 @@ export default function UsuariosPage() {
 
   const getUserUrl = (token: string) => `${window.location.origin}/u/${token}`;
 
+  /**
+   * Formatea la fecha de última llamada
+   */
+  const formatLastCall = (dateString: string | null): string => {
+    if (!dateString) return 'Nunca';
+    
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return `Hoy ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+    } else if (diffDays === 1) {
+      return 'Ayer';
+    } else if (diffDays < 7) {
+      return `Hace ${diffDays} días`;
+    } else {
+      return date.toLocaleDateString('es-ES', {
+        day: '2-digit',
+        month: 'short',
+      });
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout profile={profile ? { 
@@ -299,7 +384,8 @@ export default function UsuariosPage() {
                 <thead className="bg-gray-100 border-b-2 border-gray-200">
                   <tr>
                     <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Nombre</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Creado</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Llamadas Hoy</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Última Llamada</th>
                     <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Acciones</th>
                   </tr>
                 </thead>
@@ -308,14 +394,27 @@ export default function UsuariosPage() {
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <p className="text-lg font-semibold text-gray-900">{user.full_name}</p>
+                        <p className="text-sm text-gray-500">
+                          Creado: {new Date(user.created_at).toLocaleDateString('es-ES')}
+                        </p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-base font-semibold ${
+                          user.calls_today >= 2 
+                            ? 'bg-red-100 text-red-800' 
+                            : user.calls_today === 1 
+                              ? 'bg-yellow-100 text-yellow-800' 
+                              : 'bg-green-100 text-green-800'
+                        }`}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                          </svg>
+                          {user.calls_today} / 2
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-base text-gray-600">
-                          {new Date(user.created_at).toLocaleDateString('es-ES', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric'
-                          })}
+                          {formatLastCall(user.last_call_at)}
                         </span>
                       </td>
                       <td className="px-6 py-4">

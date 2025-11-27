@@ -9,18 +9,6 @@ import { Modal } from '@/components/Modal';
 import { Input } from '@/components/Input';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useToast } from '@/components/ToastContext';
-import { QRCodeCanvas } from 'qrcode.react';
-
-interface User {
-  id: string;
-  full_name: string;
-  login_token: string;
-  center_id: string;
-  created_at: string;
-  // Nuevos campos para estadísticas
-  calls_today: number;
-  last_call_at: string | null;
-}
 
 interface Profile {
   id: string;
@@ -29,46 +17,59 @@ interface Profile {
   center_id?: string | null;
 }
 
-export default function UsuariosPage() {
+interface Center {
+  id: string;
+  name: string;
+  timezone: string;
+}
+
+interface Manager {
+  id: string;
+  email: string;
+  role: string;
+}
+
+interface Stats {
+  totalUsers: number;
+  totalManagers: number;
+  callsToday: number;
+  callsThisMonth: number;
+}
+
+export default function DashboardPage() {
   const router = useRouter();
   const { showToast } = useToast();
   
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
+  const [center, setCenter] = useState<Center | null>(null);
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [stats, setStats] = useState<Stats>({
+    totalUsers: 0,
+    totalManagers: 0,
+    callsToday: 0,
+    callsThisMonth: 0,
+  });
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
   
-  // Modales
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
-  
-  // Usuario seleccionado
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  
-  // Formularios
-  const [newUserName, setNewUserName] = useState('');
-  const [editUserName, setEditUserName] = useState('');
-  const [generatedUrl, setGeneratedUrl] = useState('');
-  
-  // Paginación
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const PAGE_SIZE = 20;
+  // Modal invitar manager
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
-    fetchProfileAndUsers();
-  }, [page]);
+    fetchDashboardData();
+  }, []);
 
-  const fetchProfileAndUsers = async () => {
+  const fetchDashboardData = async () => {
     try {
+      // 1. Obtener usuario autenticado
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user) {
         router.replace('/login');
         return;
       }
 
+      // 2. Obtener perfil
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('id, email, role, center_id')
@@ -84,12 +85,30 @@ export default function UsuariosPage() {
       setProfile(profileData);
 
       if (!profileData.center_id) {
-        showToast('No tienes un centro asignado', 'warning');
         setLoading(false);
         return;
       }
 
-      await fetchUsers(profileData.center_id);
+      // 3. Obtener centro
+      const { data: centerData } = await supabase
+        .from('centers')
+        .select('id, name, timezone')
+        .eq('id', profileData.center_id)
+        .single();
+
+      setCenter(centerData);
+
+      // 4. Obtener managers del centro
+      const { data: managersData } = await supabase
+        .from('profiles')
+        .select('id, email, role')
+        .eq('center_id', profileData.center_id);
+
+      setManagers(managersData || []);
+
+      // 5. Obtener estadísticas
+      await fetchStats(profileData.center_id, centerData?.timezone || 'Europe/Madrid');
+
     } catch (err: any) {
       showToast(err.message || 'Error al cargar datos', 'error');
     } finally {
@@ -97,31 +116,21 @@ export default function UsuariosPage() {
     }
   };
 
-  /**
-   * Obtiene usuarios con estadísticas de llamadas
-   */
-  const fetchUsers = async (centerId: string) => {
+  const fetchStats = async (centerId: string, timezone: string) => {
     try {
-      // 1. Obtener usuarios del centro
-      const { data: usersData, error: usersError } = await supabase
+      // Total usuarios
+      const { count: usersCount } = await supabase
         .from('users')
-        .select('*')
-        .eq('center_id', centerId)
-        .order('created_at', { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        .select('id', { count: 'exact', head: true })
+        .eq('center_id', centerId);
 
-      if (usersError) throw usersError;
+      // Total managers
+      const { count: managersCount } = await supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('center_id', centerId);
 
-      // 2. Obtener timezone del centro para calcular "hoy"
-      const { data: centerData } = await supabase
-        .from('centers')
-        .select('timezone')
-        .eq('id', centerId)
-        .single();
-
-      const timezone = centerData?.timezone || 'Europe/Madrid';
-
-      // 3. Calcular inicio del día en el timezone del centro
+      // Calcular inicio del día
       const now = new Date();
       const formatter = new Intl.DateTimeFormat('en-CA', {
         timeZone: timezone,
@@ -132,57 +141,46 @@ export default function UsuariosPage() {
       const todayStr = formatter.format(now);
       const startOfDayLocal = new Date(`${todayStr}T00:00:00`);
       
-      // Convertir a UTC
       const tempDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
       const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
       const offsetMs = utcDate.getTime() - tempDate.getTime();
       const startOfDayUTC = new Date(startOfDayLocal.getTime() + offsetMs);
 
-      // 4. Enriquecer usuarios con estadísticas
-      const enrichedUsers = await Promise.all(
-        (usersData || []).map(async (user) => {
-          // Contar llamadas de hoy
-          const { data: todayCalls } = await supabase
-            .from('calls')
-            .select('id', { count: 'exact' })
-            .eq('user_id', user.id)
-            .in('status', ['started', 'completed'])
-            .gte('started_at', startOfDayUTC.toISOString());
+      // Llamadas hoy
+      const { count: callsTodayCount } = await supabase
+        .from('calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('center_id', centerId)
+        .gte('started_at', startOfDayUTC.toISOString());
 
-          // Obtener última llamada
-          const { data: lastCall } = await supabase
-            .from('calls')
-            .select('started_at')
-            .eq('user_id', user.id)
-            .in('status', ['started', 'completed'])
-            .order('started_at', { ascending: false })
-            .limit(1)
-            .single();
+      // Llamadas este mes
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const { count: callsMonthCount } = await supabase
+        .from('calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('center_id', centerId)
+        .gte('started_at', startOfMonth.toISOString());
 
-          return {
-            ...user,
-            calls_today: todayCalls?.length || 0,
-            last_call_at: lastCall?.started_at || null,
-          };
-        })
-      );
+      setStats({
+        totalUsers: usersCount || 0,
+        totalManagers: managersCount || 0,
+        callsToday: callsTodayCount || 0,
+        callsThisMonth: callsMonthCount || 0,
+      });
 
-      setUsers(enrichedUsers);
-      setHasMore((usersData || []).length === PAGE_SIZE);
-    } catch (err: any) {
-      showToast(err.message || 'Error al cargar usuarios', 'error');
+    } catch (err) {
+      console.error('Error fetching stats:', err);
     }
   };
 
-  const generateToken = () => {
-    const array = new Uint8Array(24);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-  };
+  const handleInviteManager = async () => {
+    if (!inviteEmail.trim()) {
+      showToast('El email es obligatorio', 'error');
+      return;
+    }
 
-  const handleCreateUser = async () => {
-    if (!newUserName.trim()) {
-      showToast('El nombre es obligatorio', 'error');
+    if (!inviteEmail.includes('@')) {
+      showToast('Email inválido', 'error');
       return;
     }
 
@@ -191,132 +189,61 @@ export default function UsuariosPage() {
       return;
     }
 
-    setCreating(true);
+    setInviting(true);
 
     try {
-      const token = generateToken();
-
-      const { data, error } = await supabase
-        .from('users')
-        .insert([{
-          center_id: profile.center_id,
-          full_name: newUserName.trim(),
-          login_token: token,
-        }])
-        .select()
+      // Verificar si el email ya existe en profiles
+      const { data: existingProfile, error: searchError } = await supabase
+        .from('profiles')
+        .select('id, email, center_id')
+        .eq('email', inviteEmail.trim().toLowerCase())
         .single();
 
-      if (error) throw error;
+      if (searchError && searchError.code !== 'PGRST116') {
+        throw searchError;
+      }
 
-      const url = `${window.location.origin}/u/${token}`;
-      setGeneratedUrl(url);
-      setSelectedUser({ ...data, calls_today: 0, last_call_at: null });
+      if (existingProfile) {
+        // El usuario ya existe
+        if (existingProfile.center_id) {
+          showToast('Este usuario ya está asignado a un centro', 'error');
+          return;
+        }
+
+        // Asignar el centro al usuario existente
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ center_id: profile.center_id })
+          .eq('id', existingProfile.id);
+
+        if (updateError) throw updateError;
+
+        showToast('Manager asignado al centro exitosamente', 'success');
+      } else {
+        // El usuario no existe
+        showToast(
+          'El usuario no existe. Debe registrarse primero en /register',
+          'warning'
+        );
+        setShowInviteModal(false);
+        return;
+      }
+
+      setInviteEmail('');
+      setShowInviteModal(false);
       
-      showToast('Usuario creado exitosamente', 'success');
-      setNewUserName('');
-      setShowCreateModal(false);
-      setShowQRModal(true);
-      
-      await fetchUsers(profile.center_id);
+      // Refrescar lista de managers
+      const { data: managersData } = await supabase
+        .from('profiles')
+        .select('id, email, role')
+        .eq('center_id', profile.center_id);
+
+      setManagers(managersData || []);
+
     } catch (err: any) {
-      showToast(err.message || 'Error al crear usuario', 'error');
+      showToast(err.message || 'Error al invitar manager', 'error');
     } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleEditUser = async () => {
-    if (!selectedUser || !editUserName.trim()) {
-      showToast('El nombre es obligatorio', 'error');
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ full_name: editUserName.trim() })
-        .eq('id', selectedUser.id);
-
-      if (error) throw error;
-
-      showToast('Usuario actualizado', 'success');
-      setShowEditModal(false);
-      
-      if (profile?.center_id) {
-        await fetchUsers(profile.center_id);
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Error al actualizar usuario', 'error');
-    }
-  };
-
-  const handleDeleteUser = async () => {
-    if (!selectedUser) return;
-
-    try {
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', selectedUser.id);
-
-      if (error) throw error;
-
-      showToast('Usuario eliminado', 'success');
-      setShowDeleteModal(false);
-      setSelectedUser(null);
-      
-      if (profile?.center_id) {
-        await fetchUsers(profile.center_id);
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Error al eliminar usuario', 'error');
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showToast('Enlace copiado al portapapeles', 'success');
-  };
-
-  const downloadQR = () => {
-    if (!selectedUser) return;
-    
-    const canvas = document.getElementById('qr-canvas') as HTMLCanvasElement;
-    if (!canvas) return;
-
-    const url = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.download = `qr-${selectedUser.full_name.replace(/\s+/g, '-')}.png`;
-    link.href = url;
-    link.click();
-    
-    showToast('Código QR descargado', 'success');
-  };
-
-  const getUserUrl = (token: string) => `${window.location.origin}/u/${token}`;
-
-  /**
-   * Formatea la fecha de última llamada
-   */
-  const formatLastCall = (dateString: string | null): string => {
-    if (!dateString) return 'Nunca';
-    
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) {
-      return `Hoy ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
-    } else if (diffDays === 1) {
-      return 'Ayer';
-    } else if (diffDays < 7) {
-      return `Hace ${diffDays} días`;
-    } else {
-      return date.toLocaleDateString('es-ES', {
-        day: '2-digit',
-        month: 'short',
-      });
+      setInviting(false);
     }
   };
 
@@ -342,24 +269,26 @@ export default function UsuariosPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">Usuarios</h1>
+            <h1 className="text-4xl font-bold text-gray-900">Dashboard</h1>
             <p className="text-xl text-gray-600 mt-2">
-              Gestiona los usuarios de tu centro
+              Bienvenido al panel de gestión
             </p>
           </div>
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => setShowCreateModal(true)}
-            disabled={!profile?.center_id}
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Crear Usuario
-          </Button>
+          {profile?.center_id && (
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={() => setShowInviteModal(true)}
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
+              Invitar Manager
+            </Button>
+          )}
         </div>
 
+        {/* Alerta si no tiene centro */}
         {!profile?.center_id && (
           <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-6">
             <p className="text-xl text-yellow-800">
@@ -368,135 +297,174 @@ export default function UsuariosPage() {
           </div>
         )}
 
-        {/* Tabla de usuarios */}
-        {users.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-            <svg className="w-24 h-24 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">No hay usuarios</h3>
-            <p className="text-lg text-gray-600">Crea tu primer usuario para comenzar</p>
+        {/* Stats Cards */}
+        {profile?.center_id && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard
+              title="Total Usuarios"
+              value={stats.totalUsers}
+              icon={
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              }
+              color="blue"
+            />
+            <StatCard
+              title="Managers"
+              value={stats.totalManagers}
+              icon={
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              }
+              color="green"
+            />
+            <StatCard
+              title="Llamadas Hoy"
+              value={stats.callsToday}
+              icon={
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              }
+              color="purple"
+            />
+            <StatCard
+              title="Llamadas Este Mes"
+              value={stats.callsThisMonth}
+              icon={
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              }
+              color="orange"
+            />
           </div>
-        ) : (
-          <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-100 border-b-2 border-gray-200">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Nombre</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Llamadas Hoy</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Última Llamada</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4">
-                        <p className="text-lg font-semibold text-gray-900">{user.full_name}</p>
-                        <p className="text-sm text-gray-500">
-                          Creado: {new Date(user.created_at).toLocaleDateString('es-ES')}
-                        </p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-base font-semibold ${
-                          user.calls_today >= 2 
-                            ? 'bg-red-100 text-red-800' 
-                            : user.calls_today === 1 
-                              ? 'bg-yellow-100 text-yellow-800' 
-                              : 'bg-green-100 text-green-800'
-                        }`}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                          </svg>
-                          {user.calls_today} / 2
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-base text-gray-600">
-                          {formatLastCall(user.last_call_at)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => copyToClipboard(getUserUrl(user.login_token))}
-                          >
-                            Copiar enlace
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => router.push(`/dashboard/usuarios/${user.id}`)}
-                          >
-                            Ver
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setEditUserName(user.full_name);
-                              setShowEditModal(true);
-                            }}
-                          >
-                            Editar
-                          </Button>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setShowDeleteModal(true);
-                            }}
-                          >
-                            Eliminar
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        )}
+
+        {/* Info del Centro y Managers */}
+        {profile?.center_id && center && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Info del Centro */}
+            <div className="bg-white rounded-xl shadow-lg p-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Tu Centro</h2>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600">Nombre</p>
+                  <p className="text-xl font-semibold text-gray-900">{center.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Timezone</p>
+                  <p className="text-lg text-gray-800">{center.timezone}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Tu Rol</p>
+                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                    profile.role === 'admin' 
+                      ? 'bg-purple-100 text-purple-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {profile.role === 'admin' ? 'Administrador' : 'Manager'}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Paginación */}
-            <div className="flex items-center justify-between px-6 py-4 border-t-2 border-gray-200">
+            {/* Lista de Managers */}
+            <div className="bg-white rounded-xl shadow-lg p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Managers del Centro</h2>
+                <span className="text-sm text-gray-600">{managers.length} total</span>
+              </div>
+              
+              {managers.length === 0 ? (
+                <p className="text-gray-600">No hay managers asignados</p>
+              ) : (
+                <div className="space-y-3">
+                  {managers.map((manager) => (
+                    <div
+                      key={manager.id}
+                      className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg"
+                    >
+                      <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                        {manager.email[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900">{manager.email}</p>
+                        <p className="text-sm text-gray-600">
+                          {manager.role === 'admin' ? 'Administrador' : 'Manager'}
+                        </p>
+                      </div>
+                      {manager.id === profile.id && (
+                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                          Tú
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Accesos Rápidos */}
+        {profile?.center_id && (
+          <div className="bg-white rounded-xl shadow-lg p-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Accesos Rápidos</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Button
                 variant="secondary"
-                size="md"
-                onClick={() => setPage(p => Math.max(0, p - 1))}
-                disabled={page === 0}
+                size="lg"
+                onClick={() => router.push('/dashboard/usuarios')}
+                className="w-full justify-start"
               >
-                Anterior
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                Gestionar Usuarios
               </Button>
-              <span className="text-lg text-gray-600">Página {page + 1}</span>
+              {profile.role === 'admin' && (
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => router.push('/dashboard/centros')}
+                  className="w-full justify-start"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  Gestionar Centros
+                </Button>
+              )}
               <Button
                 variant="secondary"
-                size="md"
-                onClick={() => setPage(p => p + 1)}
-                disabled={!hasMore}
+                size="lg"
+                onClick={() => setShowInviteModal(true)}
+                className="w-full justify-start"
               >
-                Siguiente
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+                Invitar Manager
               </Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Modal: Crear Usuario */}
+      {/* Modal: Invitar Manager */}
       <Modal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        title="Crear Nuevo Usuario"
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        title="Invitar Manager"
         footer={
           <>
-            <Button variant="primary" size="md" onClick={handleCreateUser} loading={creating}>
-              Crear Usuario
+            <Button variant="primary" size="md" onClick={handleInviteManager} loading={inviting}>
+              Enviar Invitación
             </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowCreateModal(false)}>
+            <Button variant="secondary" size="md" onClick={() => setShowInviteModal(false)}>
               Cancelar
             </Button>
           </>
@@ -504,109 +472,57 @@ export default function UsuariosPage() {
       >
         <div className="space-y-6">
           <Input
-            label="Nombre Completo *"
-            type="text"
-            value={newUserName}
-            onChange={(e) => setNewUserName(e.target.value)}
-            placeholder="Ej: Juan García López"
+            label="Email del Manager *"
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="manager@ejemplo.com"
+            helperText="El usuario debe haberse registrado previamente en /register"
             required
           />
-        </div>
-      </Modal>
-
-      {/* Modal: Ver QR y URL */}
-      <Modal
-        isOpen={showQRModal}
-        onClose={() => setShowQRModal(false)}
-        title={`Usuario Creado: ${selectedUser?.full_name}`}
-        footer={
-          <>
-            <Button variant="primary" size="md" onClick={downloadQR}>
-              Descargar QR
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => copyToClipboard(generatedUrl)}>
-              Copiar Enlace
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowQRModal(false)}>
-              Cerrar
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col items-center gap-6">
-          <QRCodeCanvas
-            id="qr-canvas"
-            value={generatedUrl}
-            size={320}
-            level="H"
-            includeMargin={true}
-          />
-          <div className="text-center w-full">
-            <p className="text-lg text-gray-700 mb-2">Enlace de acceso:</p>
-            <code className="block px-4 py-3 bg-gray-100 rounded-lg text-sm break-all">
-              {generatedUrl}
-            </code>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal: Editar Usuario */}
-      <Modal
-        isOpen={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        title="Editar Usuario"
-        footer={
-          <>
-            <Button variant="primary" size="md" onClick={handleEditUser}>
-              Guardar Cambios
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowEditModal(false)}>
-              Cancelar
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-6">
-          <Input
-            label="Nombre Completo *"
-            type="text"
-            value={editUserName}
-            onChange={(e) => setEditUserName(e.target.value)}
-            required
-          />
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-600">
-              <strong>Nota:</strong> El token de acceso no se puede modificar por seguridad.
+          
+          <div className="p-4 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>Nota:</strong> Se asignará este centro al perfil existente del manager.
+              Si el usuario no existe, deberá registrarse primero.
             </p>
           </div>
         </div>
       </Modal>
-
-      {/* Modal: Eliminar Usuario */}
-      <Modal
-        isOpen={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        title="Confirmar Eliminación"
-        footer={
-          <>
-            <Button variant="danger" size="md" onClick={handleDeleteUser}>
-              Sí, Eliminar
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowDeleteModal(false)}>
-              Cancelar
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-lg text-gray-700">
-            ¿Estás seguro de que deseas eliminar al usuario <strong>{selectedUser?.full_name}</strong>?
-          </p>
-          <p className="text-base text-red-600 font-medium">
-            ⚠️ Esta acción no se puede deshacer. Se eliminarán todos los datos asociados.
-          </p>
-        </div>
-      </Modal>
     </DashboardLayout>
+  );
+}
+
+// Componente StatCard
+function StatCard({ 
+  title, 
+  value, 
+  icon, 
+  color 
+}: { 
+  title: string; 
+  value: number; 
+  icon: React.ReactNode; 
+  color: 'blue' | 'green' | 'purple' | 'orange';
+}) {
+  const colors = {
+    blue: 'bg-blue-100 text-blue-600',
+    green: 'bg-green-100 text-green-600',
+    purple: 'bg-purple-100 text-purple-600',
+    orange: 'bg-orange-100 text-orange-600',
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="flex items-center gap-4">
+        <div className={`w-14 h-14 rounded-lg flex items-center justify-center ${colors[color]}`}>
+          {icon}
+        </div>
+        <div>
+          <p className="text-sm text-gray-600">{title}</p>
+          <p className="text-3xl font-bold text-gray-900">{value}</p>
+        </div>
+      </div>
+    </div>
   );
 }
