@@ -17,7 +17,6 @@ interface User {
   login_token: string;
   center_id: string;
   created_at: string;
-  // Campos para estadísticas
   calls_today: number;
   last_call_at: string | null;
 }
@@ -50,7 +49,6 @@ export default function UsuariosPage() {
   // Formularios
   const [newUserName, setNewUserName] = useState('');
   const [editUserName, setEditUserName] = useState('');
-  const [generatedUrl, setGeneratedUrl] = useState('');
   
   // Paginación
   const [page, setPage] = useState(0);
@@ -97,12 +95,8 @@ export default function UsuariosPage() {
     }
   };
 
-  /**
-   * Obtiene usuarios con estadísticas de llamadas
-   */
   const fetchUsers = async (centerId: string) => {
     try {
-      // 1. Obtener usuarios del centro
       const { data: usersData, error: usersError } = await supabase
         .from('users')
         .select('*')
@@ -112,7 +106,6 @@ export default function UsuariosPage() {
 
       if (usersError) throw usersError;
 
-      // 2. Obtener timezone del centro para calcular "hoy"
       const { data: centerData } = await supabase
         .from('centers')
         .select('timezone')
@@ -121,7 +114,6 @@ export default function UsuariosPage() {
 
       const timezone = centerData?.timezone || 'Europe/Madrid';
 
-      // 3. Calcular inicio del día en el timezone del centro
       const now = new Date();
       const formatter = new Intl.DateTimeFormat('en-CA', {
         timeZone: timezone,
@@ -132,16 +124,13 @@ export default function UsuariosPage() {
       const todayStr = formatter.format(now);
       const startOfDayLocal = new Date(`${todayStr}T00:00:00`);
       
-      // Convertir a UTC
       const tempDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
       const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
       const offsetMs = utcDate.getTime() - tempDate.getTime();
       const startOfDayUTC = new Date(startOfDayLocal.getTime() + offsetMs);
 
-      // 4. Enriquecer usuarios con estadísticas
       const enrichedUsers = await Promise.all(
         (usersData || []).map(async (user) => {
-          // Contar llamadas de hoy
           const { data: todayCalls } = await supabase
             .from('calls')
             .select('id', { count: 'exact' })
@@ -149,7 +138,6 @@ export default function UsuariosPage() {
             .in('status', ['started', 'completed'])
             .gte('started_at', startOfDayUTC.toISOString());
 
-          // Obtener última llamada
           const { data: lastCall } = await supabase
             .from('calls')
             .select('started_at')
@@ -208,8 +196,6 @@ export default function UsuariosPage() {
 
       if (error) throw error;
 
-      const url = `${window.location.origin}/u/${token}`;
-      setGeneratedUrl(url);
       setSelectedUser({ ...data, calls_today: 0, last_call_at: null });
       
       showToast('Usuario creado exitosamente', 'success');
@@ -273,6 +259,8 @@ export default function UsuariosPage() {
     }
   };
 
+  const getUserUrl = (token: string) => `${window.location.origin}/u/${token}`;
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     showToast('Enlace copiado al portapapeles', 'success');
@@ -293,11 +281,6 @@ export default function UsuariosPage() {
     showToast('Código QR descargado', 'success');
   };
 
-  const getUserUrl = (token: string) => `${window.location.origin}/u/${token}`;
-
-  /**
-   * Formatea la fecha de última llamada
-   */
   const formatLastCall = (dateString: string | null): string => {
     if (!dateString) return 'Nunca';
     
@@ -313,10 +296,7 @@ export default function UsuariosPage() {
     } else if (diffDays < 7) {
       return `Hace ${diffDays} días`;
     } else {
-      return date.toLocaleDateString('es-ES', {
-        day: '2-digit',
-        month: 'short',
-      });
+      return date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
     }
   };
 
@@ -419,13 +399,21 @@ export default function UsuariosPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
+                          {/* Botón QR - El más importante */}
                           <Button
-                            variant="secondary"
+                            variant="primary"
                             size="sm"
-                            onClick={() => copyToClipboard(getUserUrl(user.login_token))}
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setShowQRModal(true);
+                            }}
                           >
-                            Copiar enlace
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                            </svg>
+                            QR
                           </Button>
+                          {/* Ver historial */}
                           <Button
                             variant="secondary"
                             size="sm"
@@ -433,6 +421,7 @@ export default function UsuariosPage() {
                           >
                             Ver
                           </Button>
+                          {/* Editar */}
                           <Button
                             variant="secondary"
                             size="sm"
@@ -444,6 +433,7 @@ export default function UsuariosPage() {
                           >
                             Editar
                           </Button>
+                          {/* Eliminar */}
                           <Button
                             variant="danger"
                             size="sm"
@@ -518,36 +508,52 @@ export default function UsuariosPage() {
       <Modal
         isOpen={showQRModal}
         onClose={() => setShowQRModal(false)}
-        title={`Usuario Creado: ${selectedUser?.full_name}`}
+        title={`QR de ${selectedUser?.full_name}`}
         footer={
           <>
             <Button variant="primary" size="md" onClick={downloadQR}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               Descargar QR
             </Button>
-            <Button variant="secondary" size="md" onClick={() => copyToClipboard(generatedUrl)}>
+            <Button 
+              variant="secondary" 
+              size="md" 
+              onClick={() => selectedUser && copyToClipboard(getUserUrl(selectedUser.login_token))}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
               Copiar Enlace
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowQRModal(false)}>
-              Cerrar
             </Button>
           </>
         }
       >
-        <div className="flex flex-col items-center gap-6">
-          <QRCodeCanvas
-            id="qr-canvas"
-            value={generatedUrl}
-            size={320}
-            level="H"
-            includeMargin={true}
-          />
-          <div className="text-center w-full">
-            <p className="text-lg text-gray-700 mb-2">Enlace de acceso:</p>
-            <code className="block px-4 py-3 bg-gray-100 rounded-lg text-sm break-all">
-              {generatedUrl}
-            </code>
+        {selectedUser && (
+          <div className="flex flex-col items-center gap-6">
+            <div className="bg-white p-4 rounded-xl border-4 border-gray-200 shadow-inner">
+              <QRCodeCanvas
+                id="qr-canvas"
+                value={getUserUrl(selectedUser.login_token)}
+                size={280}
+                level="H"
+                includeMargin={true}
+              />
+            </div>
+            <div className="text-center w-full">
+              <p className="text-base text-gray-600 mb-2">Enlace de acceso:</p>
+              <code className="block px-4 py-3 bg-gray-100 rounded-lg text-sm break-all font-mono">
+                {getUserUrl(selectedUser.login_token)}
+              </code>
+            </div>
+            <div className="w-full p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-800 text-center">
+                💡 Imprime este QR o envía el enlace al usuario para que pueda acceder
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </Modal>
 
       {/* Modal: Editar Usuario */}
@@ -558,7 +564,7 @@ export default function UsuariosPage() {
         footer={
           <>
             <Button variant="primary" size="md" onClick={handleEditUser}>
-              Guardar Cambios
+              Guardar
             </Button>
             <Button variant="secondary" size="md" onClick={() => setShowEditModal(false)}>
               Cancelar
@@ -566,27 +572,20 @@ export default function UsuariosPage() {
           </>
         }
       >
-        <div className="space-y-6">
-          <Input
-            label="Nombre Completo *"
-            type="text"
-            value={editUserName}
-            onChange={(e) => setEditUserName(e.target.value)}
-            required
-          />
-          <div className="p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-600">
-              <strong>Nota:</strong> El token de acceso no se puede modificar por seguridad.
-            </p>
-          </div>
-        </div>
+        <Input
+          label="Nombre Completo *"
+          type="text"
+          value={editUserName}
+          onChange={(e) => setEditUserName(e.target.value)}
+          required
+        />
       </Modal>
 
       {/* Modal: Eliminar Usuario */}
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        title="Confirmar Eliminación"
+        title="Eliminar Usuario"
         footer={
           <>
             <Button variant="danger" size="md" onClick={handleDeleteUser}>
@@ -598,14 +597,12 @@ export default function UsuariosPage() {
           </>
         }
       >
-        <div className="space-y-4">
-          <p className="text-lg text-gray-700">
-            ¿Estás seguro de que deseas eliminar al usuario <strong>{selectedUser?.full_name}</strong>?
-          </p>
-          <p className="text-base text-red-600 font-medium">
-            ⚠️ Esta acción no se puede deshacer. Se eliminarán todos los datos asociados.
-          </p>
-        </div>
+        <p className="text-lg text-gray-700">
+          ¿Eliminar a <strong>{selectedUser?.full_name}</strong>?
+        </p>
+        <p className="text-base text-red-600 mt-2">
+          ⚠️ Esta acción no se puede deshacer.
+        </p>
       </Modal>
     </DashboardLayout>
   );
