@@ -19,7 +19,7 @@ export function Button({
   const baseStyles = 'font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2';
   
   const variants = {
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-300',
+    primary: 'bg-[#8B9D83] hover:bg-[#6B7D63] text-white focus:ring-[#A8B9A0]',
     secondary: 'bg-gray-200 hover:bg-gray-300 text-gray-800 focus:ring-gray-300',
     danger: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-300',
   };

@@ -3,6 +3,14 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  
+  /* Colores de Recuerdame */
+  --recuerdame-sage: #8B9D83;      /* Verde salvia principal */
+  --recuerdame-sage-dark: #6B7D63; /* Verde salvia oscuro */
+  --recuerdame-sage-light: #A8B9A0; /* Verde salvia claro */
+  --recuerdame-cream: #F5F1E8;     /* Crema/Beige */
+  --recuerdame-warm: #E8DCC8;      /* Cálido */
+  --recuerdame-dark: #2C2C2C;      /* Gris oscuro */
 }
 
 @theme inline {
@@ -10,12 +18,20 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  
+  /* Colores personalizados de Recuerdame */
+  --color-recuerdame-sage: var(--recuerdame-sage);
+  --color-recuerdame-sage-dark: var(--recuerdame-sage-dark);
+  --color-recuerdame-sage-light: var(--recuerdame-sage-light);
+  --color-recuerdame-cream: var(--recuerdame-cream);
+  --color-recuerdame-warm: var(--recuerdame-warm);
+  --color-recuerdame-dark: var(--recuerdame-dark);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #f9fafb;
-    --foreground: #111827;
+    --background: #F5F1E8;
+    --foreground: #2C2C2C;
   }
 }
 
@@ -47,7 +63,7 @@ body {
 
 /* Mejoras de accesibilidad */
 *:focus-visible {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid #8B9D83;
   outline-offset: 2px;
 }
 
@@ -59,7 +75,7 @@ body {
   
   input, select, textarea {
     min-height: 48px;
-    font-size: 16px; /* Evita zoom automático en iOS */
+    font-size: 16px;
   }
 }
 

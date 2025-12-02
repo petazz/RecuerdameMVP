@@ -384,7 +384,7 @@ export default function CentrosPage() {
                       <td className="px-6 py-4">
                         <span className="text-base text-gray-600">{center.user_count || 0}</span>
                       </td>
-                      <td className="px-6 py-4">
+<td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
                           <Button
                             variant="secondary"
@@ -395,19 +395,20 @@ export default function CentrosPage() {
                               setShowViewModal(true);
                             }}
                           >
-                            Ver
+                            Ver Detalles
                           </Button>
                           <Button
-                            variant="secondary"
+                            variant="primary"
                             size="sm"
                             onClick={() => {
                               setSelectedCenter(center);
-                              setEditCenterName(center.name);
-                              setEditCenterTimezone(center.timezone);
-                              setShowEditModal(true);
+                              setShowInviteModal(true);
                             }}
                           >
-                            Editar
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            Invitar
                           </Button>
                           <Button
                             variant="danger"
@@ -494,13 +495,30 @@ export default function CentrosPage() {
         </div>
       </Modal>
 
-      {/* Modal: Ver Centro */}
+{/* Modal: Ver Centro */}
       <Modal
         isOpen={showViewModal}
         onClose={() => setShowViewModal(false)}
         title={selectedCenter?.name || 'Centro'}
         footer={
           <>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => {
+                setShowViewModal(false);
+                if (selectedCenter) {
+                  setEditCenterName(selectedCenter.name);
+                  setEditCenterTimezone(selectedCenter.timezone);
+                  setShowEditModal(true);
+                }
+              }}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Editar Centro
+            </Button>
             <Button
               variant="primary"
               size="md"
@@ -509,6 +527,9 @@ export default function CentrosPage() {
                 setShowInviteModal(true);
               }}
             >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
               Invitar Manager
             </Button>
             <Button variant="secondary" size="md" onClick={() => setShowViewModal(false)}>

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { supabase } from '@/utils/supabase/client';
-import Link from 'next/link';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -29,7 +28,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F5F1E8] to-[#E8DCC8] px-4">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
         {/* Logo/Header */}
         <div className="text-center mb-8">
@@ -78,23 +77,19 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Submit Button */}
-          <button
+<button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-[#8B9D83] hover:bg-[#6B7D63] text-white font-semibold py-3 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>
         </form>
 
-        {/* Footer */}
+        {/* Footer - ESTE ES EL CAMBIO IMPORTANTE */}
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
-            ¿No tienes cuenta?{' '}
-            <Link href="/register" className="text-blue-600 hover:text-blue-700 font-medium">
-              Regístrate
-            </Link>
+            ¿Necesitas acceso? Contacta con un administrador.
           </p>
         </div>
       </div>

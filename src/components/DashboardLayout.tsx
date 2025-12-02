@@ -26,30 +26,38 @@ export function DashboardLayout({ children, profile }: DashboardLayoutProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b-2 border-gray-200 sticky top-0 z-40 shadow-sm">
+     {/* Header */}
+      <header className="bg-white border-b-2 border-[#E8DCC8] sticky top-0 z-40 shadow-sm">
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-blue-200 lg:hidden"
+              className="p-2 rounded-lg hover:bg-[#F5F1E8] focus:outline-none focus:ring-4 focus:ring-[#A8B9A0] lg:hidden"
               aria-label={sidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
             >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-6 h-6 text-[#2C2C2C]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">Panel de Gestión</h1>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-[#8B9D83] rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-xl">R</span>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-[#2C2C2C]">Recuérdame</h1>
+                <p className="text-xs text-gray-600">Panel de Gestión</p>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
             {profile && (
-              <div className="hidden sm:flex items-center gap-3 px-4 py-2 bg-gray-100 rounded-lg">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
+              <div className="hidden sm:flex items-center gap-3 px-4 py-2 bg-[#F5F1E8] rounded-lg">
+                <div className="w-10 h-10 bg-[#8B9D83] rounded-full flex items-center justify-center text-white font-bold text-lg">
                   {profile.email[0].toUpperCase()}
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-semibold text-gray-900">{profile.email}</p>
+                  <p className="text-sm font-semibold text-[#2C2C2C]">{profile.email}</p>
                   <p className="text-xs text-gray-600">
                     {profile.role === 'admin' ? 'Administrador' : 'Manager'}
                   </p>
@@ -66,7 +74,6 @@ export function DashboardLayout({ children, profile }: DashboardLayoutProps) {
           </div>
         </div>
       </header>
-
       <div className="flex">
         {/* Sidebar */}
         <aside
@@ -125,12 +132,11 @@ export function DashboardLayout({ children, profile }: DashboardLayoutProps) {
     </div>
   );
 }
-
 function NavItem({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
   return (
     <a
       href={href}
-      className="flex items-center gap-4 px-4 py-3 text-lg font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors focus:outline-none focus:ring-4 focus:ring-blue-200"
+      className="flex items-center gap-4 px-4 py-3 text-lg font-medium text-[#2C2C2C] hover:bg-[#E8DCC8] hover:text-[#6B7D63] rounded-lg transition-colors focus:outline-none focus:ring-4 focus:ring-[#A8B9A0]"
     >
       {icon}
       <span>{label}</span>
