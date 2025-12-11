@@ -13,17 +13,11 @@ import { useToast } from '@/components/ToastContext';
 interface Center {
   id: string;
   name: string;
+  address: string;
   timezone: string;
   created_at: string;
-  manager_count?: number;
-  user_count?: number;
-}
-
-interface Manager {
-  id: string;
-  email: string;
-  role: string;
-  created_at: string;
+  total_users: number;
+  active_managers: number;
 }
 
 interface Profile {
@@ -33,28 +27,13 @@ interface Profile {
   center_id?: string | null;
 }
 
-// Lista completa de timezones
 const TIMEZONES = [
-  'UTC',
   'Europe/Madrid',
   'Europe/London',
   'Europe/Paris',
-  'Europe/Berlin',
   'America/New_York',
-  'America/Chicago',
-  'America/Denver',
   'America/Los_Angeles',
   'America/Mexico_City',
-  'America/Bogota',
-  'America/Lima',
-  'America/Santiago',
-  'America/Buenos_Aires',
-  'America/Sao_Paulo',
-  'Asia/Tokyo',
-  'Asia/Shanghai',
-  'Asia/Dubai',
-  'Australia/Sydney',
-  'Pacific/Auckland',
 ];
 
 export default function CentrosPage() {
@@ -64,25 +43,21 @@ export default function CentrosPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [centers, setCenters] = useState<Center[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   
   // Modales
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
   
   // Centro seleccionado
   const [selectedCenter, setSelectedCenter] = useState<Center | null>(null);
-  const [centerManagers, setCenterManagers] = useState<Manager[]>([]);
   
   // Formularios
-  const [newCenterName, setNewCenterName] = useState('');
-  const [newCenterTimezone, setNewCenterTimezone] = useState('Europe/Madrid');
-  const [editCenterName, setEditCenterName] = useState('');
-  const [editCenterTimezone, setEditCenterTimezone] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
+  const [centerName, setCenterName] = useState('');
+  const [centerAddress, setCenterAddress] = useState('');
+  const [centerTimezone, setCenterTimezone] = useState('Europe/Madrid');
   
   // Paginación
   const [page, setPage] = useState(0);
@@ -90,10 +65,16 @@ export default function CentrosPage() {
   const PAGE_SIZE = 20;
 
   useEffect(() => {
-    fetchProfileAndCenters();
-  }, [page]);
+    checkAuth();
+  }, []);
 
-  const fetchProfileAndCenters = async () => {
+  useEffect(() => {
+    if (profile) {
+      fetchCenters();
+    }
+  }, [page, profile]);
+
+  const checkAuth = async () => {
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user) {
@@ -107,22 +88,16 @@ export default function CentrosPage() {
         .eq('id', userData.user.id)
         .single();
 
-      if (profileError || !profileData) {
-        showToast('Error al cargar perfil', 'error');
-        router.replace('/login');
-        return;
-      }
-
-      if (profileData.role !== 'admin') {
+      if (profileError || !profileData || profileData.role !== 'admin') {
         showToast('No tienes permisos para acceder a esta página', 'error');
         router.replace('/dashboard');
         return;
       }
 
       setProfile(profileData);
-      await fetchCenters();
     } catch (err: any) {
-      showToast(err.message || 'Error al cargar datos', 'error');
+      showToast(err.message || 'Error de autenticación', 'error');
+      router.replace('/login');
     } finally {
       setLoading(false);
     }
@@ -130,95 +105,89 @@ export default function CentrosPage() {
 
   const fetchCenters = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: centersData, error: centersError } = await supabase
         .from('centers')
         .select('*')
         .order('created_at', { ascending: false })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-      if (error) throw error;
+      if (centersError) throw centersError;
 
-      // Enriquecer con contadores
       const enrichedCenters = await Promise.all(
-        (data || []).map(async (center) => {
-          const [managersRes, usersRes] = await Promise.all([
-            supabase.from('profiles').select('id', { count: 'exact' }).eq('center_id', center.id),
-            supabase.from('users').select('id', { count: 'exact' }).eq('center_id', center.id),
-          ]);
+        (centersData || []).map(async (center) => {
+          const { count: userCount } = await supabase
+            .from('users')
+            .select('id', { count: 'exact' })
+            .eq('center_id', center.id);
+
+          const { count: managerCount } = await supabase
+            .from('profiles')
+            .select('id', { count: 'exact' })
+            .eq('center_id', center.id)
+            .in('role', ['manager', 'admin']);
 
           return {
             ...center,
-            manager_count: managersRes.count || 0,
-            user_count: usersRes.count || 0,
+            total_users: userCount || 0,
+            active_managers: managerCount || 0,
           };
         })
       );
 
       setCenters(enrichedCenters);
-      setHasMore((data || []).length === PAGE_SIZE);
+      setHasMore((centersData || []).length === PAGE_SIZE);
     } catch (err: any) {
       showToast(err.message || 'Error al cargar centros', 'error');
     }
   };
 
-  const fetchCenterManagers = async (centerId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, email, role, created_at')
-        .eq('center_id', centerId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setCenterManagers(data || []);
-    } catch (err: any) {
-      showToast(err.message || 'Error al cargar managers', 'error');
-    }
-  };
-
   const handleCreateCenter = async () => {
-    if (!newCenterName.trim()) {
-      showToast('El nombre es obligatorio', 'error');
+    if (!centerName.trim() || !centerAddress.trim()) {
+      showToast('Todos los campos son obligatorios', 'error');
       return;
     }
 
-    setCreating(true);
+    setSubmitting(true);
 
     try {
       const { error } = await supabase
         .from('centers')
         .insert([{
-          name: newCenterName.trim(),
-          timezone: newCenterTimezone,
+          name: centerName.trim(),
+          address: centerAddress.trim(),
+          timezone: centerTimezone,
         }]);
 
       if (error) throw error;
 
       showToast('Centro creado exitosamente', 'success');
-      setNewCenterName('');
-      setNewCenterTimezone('Europe/Madrid');
+      setCenterName('');
+      setCenterAddress('');
+      setCenterTimezone('Europe/Madrid');
       setShowCreateModal(false);
-      
       await fetchCenters();
     } catch (err: any) {
       showToast(err.message || 'Error al crear centro', 'error');
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   };
 
   const handleEditCenter = async () => {
-    if (!selectedCenter || !editCenterName.trim()) {
-      showToast('El nombre es obligatorio', 'error');
+    if (!selectedCenter || !centerName.trim() || !centerAddress.trim()) {
+      showToast('Todos los campos son obligatorios', 'error');
       return;
     }
+
+    setSubmitting(true);
 
     try {
       const { error } = await supabase
         .from('centers')
         .update({
-          name: editCenterName.trim(),
-          timezone: editCenterTimezone,
+          name: centerName.trim(),
+          address: centerAddress.trim(),
+          timezone: centerTimezone,
         })
         .eq('id', selectedCenter.id);
 
@@ -229,21 +198,25 @@ export default function CentrosPage() {
       await fetchCenters();
     } catch (err: any) {
       showToast(err.message || 'Error al actualizar centro', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleDeleteCenter = async () => {
     if (!selectedCenter) return;
 
-    try {
-      // Verificar si tiene managers o usuarios
-      const [managersRes, usersRes] = await Promise.all([
-        supabase.from('profiles').select('id', { count: 'exact' }).eq('center_id', selectedCenter.id),
-        supabase.from('users').select('id', { count: 'exact' }).eq('center_id', selectedCenter.id),
-      ]);
+    setSubmitting(true);
 
-      if ((managersRes.count || 0) > 0 || (usersRes.count || 0) > 0) {
-        showToast('No se puede eliminar un centro con managers o usuarios asignados', 'error');
+    try {
+      const { count: userCount } = await supabase
+        .from('users')
+        .select('id', { count: 'exact' })
+        .eq('center_id', selectedCenter.id);
+
+      if (userCount && userCount > 0) {
+        showToast('No se puede eliminar un centro con usuarios', 'error');
+        setSubmitting(false);
         return;
       }
 
@@ -260,52 +233,17 @@ export default function CentrosPage() {
       await fetchCenters();
     } catch (err: any) {
       showToast(err.message || 'Error al eliminar centro', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleInviteManager = async () => {
-    if (!selectedCenter || !inviteEmail.trim()) {
-      showToast('El email es obligatorio', 'error');
-      return;
-    }
-
-    if (!inviteEmail.includes('@')) {
-      showToast('Email inválido', 'error');
-      return;
-    }
-
-    try {
-      // Verificar si el email ya existe
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', inviteEmail.trim().toLowerCase())
-        .single();
-
-      if (existingProfile) {
-        // Actualizar center_id del perfil existente
-        const { error } = await supabase
-          .from('profiles')
-          .update({ center_id: selectedCenter.id })
-          .eq('email', inviteEmail.trim().toLowerCase());
-
-        if (error) throw error;
-        showToast('Manager asignado al centro', 'success');
-      } else {
-        showToast(
-          'El usuario no existe. Debe registrarse primero en /register',
-          'warning'
-        );
-        setShowInviteModal(false);
-        return;
-      }
-
-      setInviteEmail('');
-      setShowInviteModal(false);
-      await fetchCenterManagers(selectedCenter.id);
-    } catch (err: any) {
-      showToast(err.message || 'Error al invitar manager', 'error');
-    }
+  const openEditModal = (center: Center) => {
+    setSelectedCenter(center);
+    setCenterName(center.name);
+    setCenterAddress(center.address);
+    setCenterTimezone(center.timezone);
+    setShowEditModal(true);
   };
 
   if (loading) {
@@ -326,46 +264,127 @@ export default function CentrosPage() {
       role: profile.role, 
       center_id: profile.center_id || undefined 
     } : undefined}>
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">Centros</h1>
-            <p className="text-xl text-gray-600 mt-2">
-              Gestiona los centros y sus managers
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Centros</h1>
+            <p className="text-lg sm:text-xl text-gray-600 mt-2">
+              Gestiona todos los centros del sistema
             </p>
           </div>
           <Button
             variant="primary"
             size="lg"
             onClick={() => setShowCreateModal(true)}
+            className="w-full sm:w-auto"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Crear Centro
+            <span className="hidden sm:inline">Crear Centro</span>
+            <span className="sm:hidden">Crear</span>
           </Button>
         </div>
 
-        {/* Tabla de centros */}
+        {/* Lista de centros */}
         {centers.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-            <svg className="w-24 h-24 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="bg-white rounded-xl shadow-lg p-8 sm:p-12 text-center">
+            <svg className="w-16 h-16 sm:w-24 sm:h-24 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
             </svg>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">No hay centros</h3>
-            <p className="text-lg text-gray-600">Crea tu primer centro para comenzar</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">No hay centros</h3>
+            <p className="text-base sm:text-lg text-gray-600">Crea tu primer centro para comenzar</p>
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Vista móvil - Cards */}
+            <div className="block lg:hidden divide-y divide-gray-200">
+              {centers.map((center) => (
+                <div key={center.id} className="p-4 hover:bg-gray-50">
+                  <div className="mb-3">
+                    <h3 className="text-lg font-bold text-gray-900">{center.name}</h3>
+                    <p className="text-sm text-gray-600 mt-1">{center.address}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="bg-blue-50 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        <span className="text-xs text-blue-900 font-medium">Usuarios</span>
+                      </div>
+                      <p className="text-2xl font-bold text-blue-700">{center.total_users}</p>
+                    </div>
+
+                    <div className="bg-green-50 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        <span className="text-xs text-green-900 font-medium">Gestores</span>
+                      </div>
+                      <p className="text-2xl font-bold text-green-700">{center.active_managers}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-gray-500 mb-3">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {center.timezone}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedCenter(center);
+                        setShowStatsModal(true);
+                      }}
+                      className="w-full"
+                    >
+                      Ver
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openEditModal(center)}
+                      className="w-full"
+                    >
+                      Editar
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedCenter(center);
+                        setShowDeleteModal(true);
+                      }}
+                      className="w-full"
+                      disabled={center.total_users > 0}
+                    >
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Vista desktop - Tabla */}
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-100 border-b-2 border-gray-200">
                   <tr>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Nombre</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Timezone</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900"># Managers</th>
-                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900"># Usuarios</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Centro</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Dirección</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Zona Horaria</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Usuarios</th>
+                    <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Gestores</th>
                     <th className="px-6 py-4 text-left text-lg font-bold text-gray-900">Acciones</th>
                   </tr>
                 </thead>
@@ -374,38 +393,53 @@ export default function CentrosPage() {
                     <tr key={center.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <p className="text-lg font-semibold text-gray-900">{center.name}</p>
+                        <p className="text-sm text-gray-500">
+                          Creado: {new Date(center.created_at).toLocaleDateString('es-ES')}
+                        </p>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-base text-gray-600">{center.timezone}</span>
+                        <p className="text-base text-gray-700">{center.address}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-base text-gray-600">{center.manager_count || 0}</span>
+                        <div className="flex items-center gap-2 text-base text-gray-600">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          {center.timezone}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-base text-gray-600">{center.user_count || 0}</span>
+                        <span className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-base font-semibold">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          {center.total_users}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-base font-semibold">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                          </svg>
+                          {center.active_managers}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
                           <Button
-                            variant="secondary"
+                            variant="primary"
                             size="sm"
-                            onClick={async () => {
+                            onClick={() => {
                               setSelectedCenter(center);
-                              await fetchCenterManagers(center.id);
-                              setShowViewModal(true);
+                              setShowStatsModal(true);
                             }}
                           >
-                            Ver
+                            Ver Detalles
                           </Button>
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => {
-                              setSelectedCenter(center);
-                              setEditCenterName(center.name);
-                              setEditCenterTimezone(center.timezone);
-                              setShowEditModal(true);
-                            }}
+                            onClick={() => openEditModal(center)}
                           >
                             Editar
                           </Button>
@@ -416,6 +450,7 @@ export default function CentrosPage() {
                               setSelectedCenter(center);
                               setShowDeleteModal(true);
                             }}
+                            disabled={center.total_users > 0}
                           >
                             Eliminar
                           </Button>
@@ -428,21 +463,23 @@ export default function CentrosPage() {
             </div>
 
             {/* Paginación */}
-            <div className="flex items-center justify-between px-6 py-4 border-t-2 border-gray-200">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 py-4 border-t-2 border-gray-200">
               <Button
                 variant="secondary"
                 size="md"
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={page === 0}
+                className="w-full sm:w-auto"
               >
                 Anterior
               </Button>
-              <span className="text-lg text-gray-600">Página {page + 1}</span>
+              <span className="text-base sm:text-lg text-gray-600">Página {page + 1}</span>
               <Button
                 variant="secondary"
                 size="md"
                 onClick={() => setPage(p => p + 1)}
                 disabled={!hasMore}
+                className="w-full sm:w-auto"
               >
                 Siguiente
               </Button>
@@ -458,7 +495,7 @@ export default function CentrosPage() {
         title="Crear Nuevo Centro"
         footer={
           <>
-            <Button variant="primary" size="md" onClick={handleCreateCenter} loading={creating}>
+            <Button variant="primary" size="md" onClick={handleCreateCenter} loading={submitting}>
               Crear Centro
             </Button>
             <Button variant="secondary" size="md" onClick={() => setShowCreateModal(false)}>
@@ -467,86 +504,36 @@ export default function CentrosPage() {
           </>
         }
       >
-        <div className="space-y-6">
+        <div className="space-y-4">
           <Input
             label="Nombre del Centro *"
             type="text"
-            value={newCenterName}
-            onChange={(e) => setNewCenterName(e.target.value)}
-            placeholder="Ej: Centro de Mayores El Roble"
+            value={centerName}
+            onChange={(e) => setCenterName(e.target.value)}
+            placeholder="Ej: Residencia San José"
             required
           />
-          
+          <Input
+            label="Dirección *"
+            type="text"
+            value={centerAddress}
+            onChange={(e) => setCenterAddress(e.target.value)}
+            placeholder="Ej: Calle Mayor 123, Madrid"
+            required
+          />
           <div>
-            <label className="block text-lg font-semibold text-gray-800 mb-2">
-              Timezone *
+            <label className="block text-base font-semibold text-gray-900 mb-2">
+              Zona Horaria *
             </label>
             <select
-              value={newCenterTimezone}
-              onChange={(e) => setNewCenterTimezone(e.target.value)}
-              className="w-full px-4 py-3 text-lg border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-4 focus:border-blue-500 focus:ring-blue-200"
+              value={centerTimezone}
+              onChange={(e) => setCenterTimezone(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               {TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>{tz}</option>
               ))}
             </select>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal: Ver Centro */}
-      <Modal
-        isOpen={showViewModal}
-        onClose={() => setShowViewModal(false)}
-        title={selectedCenter?.name || 'Centro'}
-        footer={
-          <>
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => {
-                setShowViewModal(false);
-                setShowInviteModal(true);
-              }}
-            >
-              Invitar Manager
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowViewModal(false)}>
-              Cerrar
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-base text-gray-600">Nombre:</p>
-              <p className="text-lg font-semibold text-gray-900">{selectedCenter?.name}</p>
-            </div>
-            <div>
-              <p className="text-base text-gray-600">Timezone:</p>
-              <p className="text-lg font-semibold text-gray-900">{selectedCenter?.timezone}</p>
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-xl font-bold text-gray-900 mb-4">
-              Managers ({centerManagers.length})
-            </h3>
-            {centerManagers.length === 0 ? (
-              <p className="text-base text-gray-600">No hay managers asignados</p>
-            ) : (
-              <div className="space-y-3">
-                {centerManagers.map((manager) => (
-                  <div key={manager.id} className="p-4 bg-gray-50 rounded-lg">
-                    <p className="text-base font-semibold text-gray-900">{manager.email}</p>
-                    <p className="text-sm text-gray-600">
-                      {manager.role === 'admin' ? 'Administrador' : 'Manager'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </Modal>
@@ -558,7 +545,7 @@ export default function CentrosPage() {
         title="Editar Centro"
         footer={
           <>
-            <Button variant="primary" size="md" onClick={handleEditCenter}>
+            <Button variant="primary" size="md" onClick={handleEditCenter} loading={submitting}>
               Guardar Cambios
             </Button>
             <Button variant="secondary" size="md" onClick={() => setShowEditModal(false)}>
@@ -567,23 +554,29 @@ export default function CentrosPage() {
           </>
         }
       >
-        <div className="space-y-6">
+        <div className="space-y-4">
           <Input
             label="Nombre del Centro *"
             type="text"
-            value={editCenterName}
-            onChange={(e) => setEditCenterName(e.target.value)}
+            value={centerName}
+            onChange={(e) => setCenterName(e.target.value)}
             required
           />
-          
+          <Input
+            label="Dirección *"
+            type="text"
+            value={centerAddress}
+            onChange={(e) => setCenterAddress(e.target.value)}
+            required
+          />
           <div>
-            <label className="block text-lg font-semibold text-gray-800 mb-2">
-              Timezone *
+            <label className="block text-base font-semibold text-gray-900 mb-2">
+              Zona Horaria *
             </label>
             <select
-              value={editCenterTimezone}
-              onChange={(e) => setEditCenterTimezone(e.target.value)}
-              className="w-full px-4 py-3 text-lg border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-4 focus:border-blue-500 focus:ring-blue-200"
+              value={centerTimezone}
+              onChange={(e) => setCenterTimezone(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               {TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>{tz}</option>
@@ -597,10 +590,10 @@ export default function CentrosPage() {
       <Modal
         isOpen={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        title="Confirmar Eliminación"
+        title="Eliminar Centro"
         footer={
           <>
-            <Button variant="danger" size="md" onClick={handleDeleteCenter}>
+            <Button variant="danger" size="md" onClick={handleDeleteCenter} loading={submitting}>
               Sí, Eliminar
             </Button>
             <Button variant="secondary" size="md" onClick={() => setShowDeleteModal(false)}>
@@ -611,47 +604,78 @@ export default function CentrosPage() {
       >
         <div className="space-y-4">
           <p className="text-lg text-gray-700">
-            ¿Estás seguro de que deseas eliminar el centro <strong>{selectedCenter?.name}</strong>?
+            ¿Eliminar el centro <strong>{selectedCenter?.name}</strong>?
           </p>
-          <p className="text-base text-red-600 font-medium">
-            ⚠️ Solo se puede eliminar si no tiene managers ni usuarios asignados.
-          </p>
+          {selectedCenter && selectedCenter.total_users > 0 ? (
+            <div className="p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+              <p className="text-base text-red-800 font-semibold">
+                ⚠️ No se puede eliminar este centro porque tiene {selectedCenter.total_users} usuario(s) asignado(s).
+              </p>
+            </div>
+          ) : (
+            <p className="text-base text-red-600">
+              ⚠️ Esta acción no se puede deshacer.
+            </p>
+          )}
         </div>
       </Modal>
 
-      {/* Modal: Invitar Manager */}
+      {/* Modal: Ver Estadísticas */}
       <Modal
-        isOpen={showInviteModal}
-        onClose={() => setShowInviteModal(false)}
-        title="Invitar Manager"
+        isOpen={showStatsModal}
+        onClose={() => setShowStatsModal(false)}
+        title={selectedCenter?.name || 'Detalles del Centro'}
         footer={
-          <>
-            <Button variant="primary" size="md" onClick={handleInviteManager}>
-              Enviar Invitación
-            </Button>
-            <Button variant="secondary" size="md" onClick={() => setShowInviteModal(false)}>
-              Cancelar
-            </Button>
-          </>
+          <Button variant="secondary" size="md" onClick={() => setShowStatsModal(false)}>
+            Cerrar
+          </Button>
         }
       >
-        <div className="space-y-6">
-          <Input
-            label="Email del Manager *"
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="manager@ejemplo.com"
-            helperText="El usuario debe haberse registrado previamente en /register"
-            required
-          />
-          
-          <div className="p-4 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Nota:</strong> Se asignará este centro al perfil existente del manager.
-            </p>
+        {selectedCenter && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-base font-semibold text-gray-700 mb-1">Dirección</h3>
+              <p className="text-lg text-gray-900">{selectedCenter.address}</p>
+            </div>
+            
+            <div>
+              <h3 className="text-base font-semibold text-gray-700 mb-1">Zona Horaria</h3>
+              <p className="text-lg text-gray-900">{selectedCenter.timezone}</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-blue-50 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  <span className="text-sm text-blue-900 font-medium">Total Usuarios</span>
+                </div>
+                <p className="text-3xl font-bold text-blue-700">{selectedCenter.total_users}</p>
+              </div>
+
+              <div className="bg-green-50 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                  <span className="text-sm text-green-900 font-medium">Gestores Activos</span>
+                </div>
+                <p className="text-3xl font-bold text-green-700">{selectedCenter.active_managers}</p>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <p className="text-sm text-gray-500">
+                Creado el {new Date(selectedCenter.created_at).toLocaleDateString('es-ES', { 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                })}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </Modal>
     </DashboardLayout>
   );

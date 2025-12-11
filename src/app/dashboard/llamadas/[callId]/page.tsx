@@ -1,31 +1,28 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
+import { useRouter, useParams } from 'next/navigation';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Button } from '@/components/Button';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { useToast } from '@/components/ToastContext';
 
-interface Transcript {
-  id: string;
-  call_id: string;
-  content: string;
-  metadata: any;
-  created_at: string;
-}
-
 interface Call {
   id: string;
   user_id: string;
   started_at: string;
-  ended_at: string;
-  duration_seconds: number;
-  status: string;
-  users: {
-    full_name: string;
-  };
+  ended_at: string | null;
+  duration_seconds: number | null;
+  status: 'started' | 'completed' | 'failed';
+  transcript: string | null;
+  elevenlabs_conversation_id: string | null;
+}
+
+interface User {
+  id: string;
+  full_name: string;
+  center_id: string;
 }
 
 interface Profile {
@@ -35,22 +32,21 @@ interface Profile {
   center_id?: string | null;
 }
 
-export default function TranscriptPage() {
-  const params = useParams();
+export default function TranscriptionPage() {
   const router = useRouter();
+  const params = useParams();
   const { showToast } = useToast();
-  const callId = params.callId as string;
-
-  const [call, setCall] = useState<Call | null>(null);
-  const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [loading, setLoading] = useState(true);
+  
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [call, setCall] = useState<Call | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchTranscript();
-  }, [callId]);
+    fetchCallData();
+  }, []);
 
-  const fetchTranscript = async () => {
+  const fetchCallData = async () => {
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user) {
@@ -72,125 +68,140 @@ export default function TranscriptPage() {
 
       setProfile(profileData);
 
-      // Obtener call con info del usuario
+      if (!profileData.center_id) {
+        showToast('No tienes un centro asignado', 'warning');
+        setLoading(false);
+        return;
+      }
+
+      const callId = params.callId as string;
+
       const { data: callData, error: callError } = await supabase
         .from('calls')
-        .select(`
-          *,
-          users (
-            full_name
-          )
-        `)
+        .select('*')
         .eq('id', callId)
         .single();
 
-      if (callError) {
+      if (callError || !callData) {
         showToast('Llamada no encontrada', 'error');
-        router.replace('/dashboard/usuarios');
+        router.replace('/dashboard');
         return;
       }
 
       setCall(callData);
 
-      // Obtener transcripción (puede no existir aún)
-      const { data: transcriptData, error: transcriptError } = await supabase
-        .from('transcripts')
+      const { data: userDetailData, error: userDetailError } = await supabase
+        .from('users')
         .select('*')
-        .eq('call_id', callId)
+        .eq('id', callData.user_id)
+        .eq('center_id', profileData.center_id)
         .single();
 
-      if (transcriptError && transcriptError.code !== 'PGRST116') {
-        console.error('Error obteniendo transcripción:', transcriptError);
+      if (userDetailError || !userDetailData) {
+        showToast('Usuario no encontrado o sin permisos', 'error');
+        router.replace('/dashboard');
+        return;
       }
 
-      setTranscript(transcriptData);
+      setUser(userDetailData);
+
     } catch (err: any) {
-      console.error('Error:', err);
       showToast(err.message || 'Error al cargar datos', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const downloadTranscript = () => {
-    if (!transcript || !call) return;
+  const formatDuration = (seconds: number | null): string => {
+    if (!seconds) return '0s';
+    
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    
+    if (mins > 0) {
+      return `${mins} minuto${mins !== 1 ? 's' : ''} ${secs} segundo${secs !== 1 ? 's' : ''}`;
+    }
+    return `${secs} segundo${secs !== 1 ? 's' : ''}`;
+  };
 
-    const userName = (call.users as any).full_name;
-    const date = new Date(call.started_at).toLocaleString('es-ES');
-    const duration = formatDuration(call.duration_seconds);
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const getStatusInfo = (status: string) => {
+    const statusConfig = {
+      completed: {
+        label: 'Completada',
+        bgColor: 'bg-green-100',
+        textColor: 'text-green-800',
+        icon: (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+      started: {
+        label: 'En curso',
+        bgColor: 'bg-yellow-100',
+        textColor: 'text-yellow-800',
+        icon: (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+      failed: {
+        label: 'Fallida',
+        bgColor: 'bg-red-100',
+        textColor: 'text-red-800',
+        icon: (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+    };
+
+    return statusConfig[status as keyof typeof statusConfig] || statusConfig.failed;
+  };
+
+  const downloadTranscript = () => {
+    if (!call || !call.transcript || !user) return;
 
     const content = `
-╔════════════════════════════════════════════════════════════════╗
-║           TRANSCRIPCIÓN DE LLAMADA - RECUÉRDAME               ║
-╚════════════════════════════════════════════════════════════════╝
+TRANSCRIPCIÓN DE LLAMADA
+========================
 
-Usuario:    ${userName}
-Fecha:      ${date}
-Duración:   ${duration}
-Estado:     ${call.status === 'completed' ? 'Completada' : call.status}
+Usuario: ${user.full_name}
+Fecha: ${formatDate(call.started_at)}
+Duración: ${formatDuration(call.duration_seconds)}
+Estado: ${getStatusInfo(call.status).label}
 
-────────────────────────────────────────────────────────────────
+Transcripción:
+--------------
+${call.transcript}
 
-TRANSCRIPCIÓN:
-
-${transcript.content}
-
-────────────────────────────────────────────────────────────────
-
-Generado el ${new Date().toLocaleString('es-ES')}
-ID de llamada: ${callId}
-
-════════════════════════════════════════════════════════════════
+ID de Llamada: ${call.id}
+ID de Conversación ElevenLabs: ${call.elevenlabs_conversation_id || 'N/A'}
     `.trim();
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `transcripcion-${userName.replace(/\s+/g, '-')}-${new Date(call.started_at).toISOString().split('T')[0]}.txt`;
+    link.download = `transcripcion-${user.full_name}-${new Date(call.started_at).toISOString().split('T')[0]}.txt`;
     link.click();
     URL.revokeObjectURL(url);
-    
+
     showToast('Transcripción descargada', 'success');
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const getStatusInfo = (status: string) => {
-    const statusMap = {
-      completed: {
-        color: 'bg-green-100 text-green-800 border-green-300',
-        label: 'Completada',
-        icon: (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ),
-      },
-      started: {
-        color: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-        label: 'En curso',
-        icon: (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ),
-      },
-      failed: {
-        color: 'bg-red-100 text-red-800 border-red-300',
-        label: 'Fallida',
-        icon: (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        ),
-      },
-    };
-    return statusMap[status as keyof typeof statusMap] || statusMap.failed;
   };
 
   if (loading) {
@@ -205,21 +216,7 @@ ID de llamada: ${callId}
     );
   }
 
-  if (!call) {
-    return (
-      <DashboardLayout profile={profile ? { 
-        email: profile.email, 
-        role: profile.role, 
-        center_id: profile.center_id || undefined 
-      } : undefined}>
-        <div className="text-center py-12">
-          <p className="text-xl text-red-600">Llamada no encontrada</p>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  const statusInfo = getStatusInfo(call.status);
+  const statusInfo = call ? getStatusInfo(call.status) : null;
 
   return (
     <DashboardLayout profile={profile ? { 
@@ -227,174 +224,173 @@ ID de llamada: ${callId}
       role: profile.role, 
       center_id: profile.center_id || undefined 
     } : undefined}>
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {/* Header */}
-        <div>
-          <Button variant="secondary" size="md" onClick={() => router.back()} className="mb-4">
-            ← Volver
-          </Button>
-          <h1 className="text-4xl font-bold text-gray-900">Transcripción de Llamada</h1>
-          <p className="text-xl text-gray-600 mt-2">
-            Conversación con {(call.users as any).full_name}
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 truncate">
+              Transcripción de Llamada
+            </h1>
+            <p className="text-base sm:text-lg lg:text-xl text-gray-600 mt-2">
+              {user?.full_name || 'Usuario'}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={downloadTranscript}
+              disabled={!call?.transcript}
+              className="w-full sm:w-auto"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span className="hidden sm:inline">Descargar</span>
+              <span className="sm:hidden">Descargar Transcripción</span>
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => router.back()}
+              className="w-full sm:w-auto"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Volver
+            </Button>
+          </div>
         </div>
 
-        {/* Info de la llamada */}
-        <div className="bg-white rounded-xl shadow-lg p-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                <p className="text-sm text-gray-600 font-medium">Usuario</p>
-              </div>
-              <p className="text-lg font-bold text-gray-900">{(call.users as any).full_name}</p>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        {/* Información de la llamada */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 border-2 border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 sm:p-3 bg-blue-100 rounded-lg">
+                <svg className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <p className="text-sm text-gray-600 font-medium">Fecha y Hora</p>
               </div>
-              <p className="text-lg font-bold text-gray-900">
-                {new Date(call.started_at).toLocaleDateString('es-ES', {
-                  day: '2-digit',
-                  month: 'long',
-                  year: 'numeric'
-                })}
-              </p>
-              <p className="text-sm text-gray-600">
-                {new Date(call.started_at).toLocaleTimeString('es-ES', {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </p>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium">Fecha y Hora</p>
+                <p className="text-sm sm:text-base font-bold text-gray-900 truncate">
+                  {call ? new Date(call.started_at).toLocaleDateString('es-ES', { 
+                    day: '2-digit', 
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  }) : 'N/A'}
+                </p>
+              </div>
             </div>
+          </div>
 
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 border-2 border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 sm:p-3 bg-green-100 rounded-lg">
+                <svg className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-sm text-gray-600 font-medium">Duración</p>
               </div>
-              <p className="text-lg font-bold text-gray-900 font-mono">
-                {formatDuration(call.duration_seconds)}
-              </p>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium">Duración</p>
+                <p className="text-sm sm:text-base font-bold text-gray-900 truncate">
+                  {call ? formatDuration(call.duration_seconds) : 'N/A'}
+                </p>
+              </div>
             </div>
+          </div>
 
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-sm text-gray-600 font-medium">Estado</p>
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 border-2 border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div className={`p-2 sm:p-3 ${statusInfo?.bgColor} rounded-lg`}>
+                <div className={statusInfo?.textColor}>
+                  {statusInfo?.icon}
+                </div>
               </div>
-              <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold border-2 ${statusInfo.color}`}>
-                {statusInfo.icon}
-                {statusInfo.label}
-              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium">Estado</p>
+                <p className={`text-sm sm:text-base font-bold ${statusInfo?.textColor} truncate`}>
+                  {statusInfo?.label || 'Desconocido'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 border-2 border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 sm:p-3 bg-purple-100 rounded-lg">
+                <svg className="w-6 h-6 sm:w-8 sm:h-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm text-gray-600 font-medium">Usuario</p>
+                <p className="text-sm sm:text-base font-bold text-gray-900 truncate">
+                  {user?.full_name || 'Desconocido'}
+                </p>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Transcripción */}
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          <div className="px-6 py-4 border-b-2 border-gray-200 flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">Transcripción</h2>
-              {transcript && (
-                <p className="text-sm text-gray-600 mt-1">
-                  Generada el {new Date(transcript.created_at).toLocaleDateString('es-ES')} a las{' '}
-                  {new Date(transcript.created_at).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </p>
-              )}
+          <div className="px-4 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-blue-500 to-blue-600 border-b-2 border-blue-700">
+            <div className="flex items-center gap-3">
+              <svg className="w-6 h-6 sm:w-8 sm:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h2 className="text-xl sm:text-2xl font-bold text-white">Transcripción</h2>
             </div>
-            {transcript && (
-              <Button variant="secondary" size="md" onClick={downloadTranscript}>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Descargar TXT
-              </Button>
-            )}
           </div>
 
-          <div className="p-8">
-            {!transcript ? (
-              <div className="text-center py-12">
-                <svg className="w-20 h-20 mx-auto text-gray-400 mb-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="p-4 sm:p-6 lg:p-8">
+            {!call?.transcript ? (
+              <div className="text-center py-8 sm:py-12">
+                <svg className="w-16 h-16 sm:w-20 sm:h-20 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <h3 className="text-2xl font-bold text-gray-900 mb-3">No hay transcripción disponible</h3>
-                <p className="text-lg text-gray-600 mb-6">
-                  La transcripción se genera automáticamente al finalizar la llamada
+                <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-2">
+                  No hay transcripción disponible
+                </h3>
+                <p className="text-sm sm:text-base text-gray-600">
+                  Esta llamada aún no tiene una transcripción o está siendo procesada
                 </p>
-                <div className="inline-flex items-center gap-3 bg-blue-50 px-6 py-4 rounded-lg border-2 border-blue-200">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div className="text-left">
-                    <p className="text-sm font-semibold text-blue-900">
-                      {call.status === 'completed' ? 'Procesando...' : 'En espera...'}
-                    </p>
-                    <p className="text-sm text-blue-700">
-                      {call.status === 'completed' 
-                        ? 'La transcripción debería aparecer en unos momentos' 
-                        : 'La llamada debe completarse primero'}
-                    </p>
-                  </div>
-                </div>
               </div>
             ) : (
-              <div className="space-y-6">
-                {/* Transcripción principal */}
-                <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-8 border-2 border-gray-200">
-                  <pre className="whitespace-pre-wrap text-base text-gray-800 font-sans leading-relaxed">
-                    {transcript.content}
+              <div className="bg-gray-50 rounded-lg p-4 sm:p-6 lg:p-8 border-2 border-gray-200">
+                <div className="prose prose-sm sm:prose-base lg:prose-lg max-w-none">
+                  <pre className="whitespace-pre-wrap text-sm sm:text-base lg:text-lg leading-relaxed text-gray-800 font-sans break-words">
+                    {call.transcript}
                   </pre>
-                </div>
-
-                {/* Metadata técnica (colapsable) */}
-                {transcript.metadata && Object.keys(transcript.metadata).length > 0 && (
-                  <details className="group">
-                    <summary className="flex items-center gap-2 text-base font-semibold text-gray-700 cursor-pointer hover:text-gray-900 select-none">
-                      <svg className="w-5 h-5 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                      Información técnica
-                    </summary>
-                    <div className="mt-4 p-6 bg-gray-900 rounded-lg overflow-x-auto">
-                      <pre className="text-xs text-green-400 font-mono">
-                        {JSON.stringify(transcript.metadata, null, 2)}
-                      </pre>
-                    </div>
-                  </details>
-                )}
-
-                {/* Info adicional */}
-                <div className="flex items-start gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <svg className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div className="text-sm text-blue-900">
-                    <p className="font-semibold mb-1">Sobre esta transcripción</p>
-                    <p className="text-blue-800">
-                      Esta transcripción fue generada automáticamente por el sistema de conversación de IA. 
-                      El contenido refleja la conversación mantenida entre el usuario y el asistente virtual.
-                    </p>
-                  </div>
                 </div>
               </div>
             )}
           </div>
         </div>
+
+        {/* Información técnica */}
+        {call?.elevenlabs_conversation_id && (
+          <div className="bg-gray-100 rounded-xl shadow-lg p-4 sm:p-6">
+            <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-3">Información Técnica</h3>
+            <div className="space-y-2 text-sm sm:text-base">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                <span className="text-gray-600 font-medium">ID de Llamada:</span>
+                <code className="bg-white px-3 py-1 rounded border border-gray-300 font-mono text-xs sm:text-sm break-all">
+                  {call.id}
+                </code>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                <span className="text-gray-600 font-medium">ID de Conversación ElevenLabs:</span>
+                <code className="bg-white px-3 py-1 rounded border border-gray-300 font-mono text-xs sm:text-sm break-all">
+                  {call.elevenlabs_conversation_id}
+                </code>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

@@ -318,12 +318,12 @@ export default function UsuariosPage() {
       role: profile.role, 
       center_id: profile.center_id || undefined 
     } : undefined}>
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">Usuarios</h1>
-            <p className="text-xl text-gray-600 mt-2">
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Usuarios</h1>
+            <p className="text-lg sm:text-xl text-gray-600 mt-2">
               Gestiona los usuarios de tu centro
             </p>
           </div>
@@ -332,34 +332,117 @@ export default function UsuariosPage() {
             size="lg"
             onClick={() => setShowCreateModal(true)}
             disabled={!profile?.center_id}
+            className="w-full sm:w-auto"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Crear Usuario
+            <span className="hidden sm:inline">Crear Usuario</span>
+            <span className="sm:hidden">Crear</span>
           </Button>
         </div>
 
         {!profile?.center_id && (
-          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-6">
-            <p className="text-xl text-yellow-800">
+          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 sm:p-6">
+            <p className="text-base sm:text-xl text-yellow-800">
               ⚠️ No tienes un centro asignado. Contacta con un administrador.
             </p>
           </div>
         )}
 
-        {/* Tabla de usuarios */}
+        {/* Lista de usuarios */}
         {users.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-            <svg className="w-24 h-24 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="bg-white rounded-xl shadow-lg p-8 sm:p-12 text-center">
+            <svg className="w-16 h-16 sm:w-24 sm:h-24 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">No hay usuarios</h3>
-            <p className="text-lg text-gray-600">Crea tu primer usuario para comenzar</p>
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">No hay usuarios</h3>
+            <p className="text-base sm:text-lg text-gray-600">Crea tu primer usuario para comenzar</p>
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Vista móvil - Cards */}
+            <div className="block lg:hidden divide-y divide-gray-200">
+              {users.map((user) => (
+                <div key={user.id} className="p-4 hover:bg-gray-50">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-base font-semibold text-gray-900 truncate">{user.full_name}</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Creado: {new Date(user.created_at).toLocaleDateString('es-ES')}
+                      </p>
+                    </div>
+                    <span className={`flex-shrink-0 ml-2 px-2 py-1 rounded-full text-xs font-semibold ${
+                      user.calls_today >= 2 
+                        ? 'bg-red-100 text-red-800' 
+                        : user.calls_today === 1 
+                          ? 'bg-yellow-100 text-yellow-800' 
+                          : 'bg-green-100 text-green-800'
+                    }`}>
+                      {user.calls_today}/2
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 mb-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Última llamada:</span>
+                      <span className="font-medium text-gray-900">{formatLastCall(user.last_call_at)}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setShowQRModal(true);
+                      }}
+                      className="w-full"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                      </svg>
+                      <span className="hidden xs:inline">QR</span>
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => router.push(`/dashboard/usuarios/${user.id}`)}
+                      className="w-full"
+                    >
+                      Ver
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setEditUserName(user.full_name);
+                        setShowEditModal(true);
+                      }}
+                      className="w-full"
+                    >
+                      Editar
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setShowDeleteModal(true);
+                      }}
+                      className="w-full"
+                    >
+                      Eliminar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Vista desktop - Tabla */}
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-100 border-b-2 border-gray-200">
                   <tr>
@@ -399,7 +482,6 @@ export default function UsuariosPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
-                          {/* Botón QR - El más importante */}
                           <Button
                             variant="primary"
                             size="sm"
@@ -413,7 +495,6 @@ export default function UsuariosPage() {
                             </svg>
                             QR
                           </Button>
-                          {/* Ver historial */}
                           <Button
                             variant="secondary"
                             size="sm"
@@ -421,7 +502,6 @@ export default function UsuariosPage() {
                           >
                             Ver
                           </Button>
-                          {/* Editar */}
                           <Button
                             variant="secondary"
                             size="sm"
@@ -433,7 +513,6 @@ export default function UsuariosPage() {
                           >
                             Editar
                           </Button>
-                          {/* Eliminar */}
                           <Button
                             variant="danger"
                             size="sm"
@@ -453,21 +532,23 @@ export default function UsuariosPage() {
             </div>
 
             {/* Paginación */}
-            <div className="flex items-center justify-between px-6 py-4 border-t-2 border-gray-200">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 py-4 border-t-2 border-gray-200">
               <Button
                 variant="secondary"
                 size="md"
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={page === 0}
+                className="w-full sm:w-auto"
               >
                 Anterior
               </Button>
-              <span className="text-lg text-gray-600">Página {page + 1}</span>
+              <span className="text-base sm:text-lg text-gray-600">Página {page + 1}</span>
               <Button
                 variant="secondary"
                 size="md"
                 onClick={() => setPage(p => p + 1)}
                 disabled={!hasMore}
+                className="w-full sm:w-auto"
               >
                 Siguiente
               </Button>

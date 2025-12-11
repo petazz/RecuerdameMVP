@@ -1,3 +1,4 @@
+// src/app/register/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -11,13 +12,12 @@ export default function RegisterPage() {
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'manager' as 'admin' | 'manager',
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
@@ -56,7 +56,7 @@ export default function RegisterPage() {
         return;
       }
 
-      // Si el usuario se crea, añade su perfil en la tabla profiles
+      // Si el usuario se crea, añade su perfil en la tabla profiles como Manager
       if (authData.user) {
         const { error: profileError } = await supabase
           .from('profiles')
@@ -64,8 +64,8 @@ export default function RegisterPage() {
             {
               id: authData.user.id,
               email: formData.email,
-              role: formData.role,
-              center_id: null,
+              role: 'manager', // Siempre manager
+              center_id: null, // Sin centro asignado inicialmente
             },
           ]);
 
@@ -76,7 +76,7 @@ export default function RegisterPage() {
         }
 
         setSuccess(true);
-        setFormData({ email: '', password: '', confirmPassword: '', role: 'manager' });
+        setFormData({ email: '', password: '', confirmPassword: '' });
       }
     } catch (err: any) {
       setError(err.message || 'Error al registrar usuario');
@@ -97,6 +97,9 @@ export default function RegisterPage() {
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Registro exitoso!</h2>
             <p className="text-gray-600">Por favor, verifica tu correo electrónico para confirmar la cuenta.</p>
+            <p className="text-sm text-gray-500 mt-4">
+              Una vez verificado, un administrador te asignará a un centro.
+            </p>
           </div>
           <button
             onClick={() => router.push('/login')}
@@ -115,7 +118,7 @@ export default function RegisterPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800">Crear cuenta</h1>
-          <p className="text-gray-600 mt-2">Registro de Manager/Admin</p>
+          <p className="text-gray-600 mt-2">Registro de Manager</p>
         </div>
 
         {/* Form */}
@@ -152,6 +155,7 @@ export default function RegisterPage() {
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
               placeholder="••••••••"
             />
+            <p className="text-xs text-gray-500 mt-1">Mínimo 6 caracteres</p>
           </div>
 
           {/* Confirm Password */}
@@ -171,22 +175,6 @@ export default function RegisterPage() {
             />
           </div>
 
-          {/* Role */}
-          <div>
-            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
-              Rol
-            </label>
-            <select
-              id="role"
-              name="role"
-              value={formData.role}
-              onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-            >
-              <option value="manager">Manager</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
 
           {/* Error Message */}
           {error && (
