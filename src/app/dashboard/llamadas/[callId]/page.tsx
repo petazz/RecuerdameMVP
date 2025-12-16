@@ -15,8 +15,15 @@ interface Call {
   ended_at: string | null;
   duration_seconds: number | null;
   status: 'started' | 'completed' | 'failed';
-  transcript: string | null;
   elevenlabs_conversation_id: string | null;
+}
+
+interface Transcript {
+  id: string;
+  call_id: string;
+  content: string;
+  metadata: any;
+  created_at: string;
 }
 
 interface User {
@@ -39,6 +46,7 @@ export default function TranscriptionPage() {
   
   const [profile, setProfile] = useState<Profile | null>(null);
   const [call, setCall] = useState<Call | null>(null);
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -75,7 +83,9 @@ export default function TranscriptionPage() {
       }
 
       const callId = params.callId as string;
+      console.log('🔍 [Debug] Buscando call_id:', callId);
 
+      // ✅ Obtener la llamada
       const { data: callData, error: callError } = await supabase
         .from('calls')
         .select('*')
@@ -83,13 +93,48 @@ export default function TranscriptionPage() {
         .single();
 
       if (callError || !callData) {
+        console.error('❌ [Debug] Error obteniendo call:', callError);
         showToast('Llamada no encontrada', 'error');
         router.replace('/dashboard');
         return;
       }
 
+      console.log('✅ [Debug] Call encontrada:', callData);
       setCall(callData);
 
+      // ✅ Obtener la transcripción de la tabla transcripts
+      console.log('🔍 [Debug] Buscando transcripción para call_id:', callId);
+      
+      const { data: transcriptData, error: transcriptError } = await supabase
+        .from('transcripts')
+        .select('*')
+        .eq('call_id', callId)
+        .maybeSingle();
+
+      console.log('📋 [Debug] Resultado de transcripts:', {
+        data: transcriptData,
+        error: transcriptError,
+        hasContent: !!transcriptData?.content,
+        contentLength: transcriptData?.content?.length || 0
+      });
+
+      if (transcriptError) {
+        console.error('❌ [Debug] Error obteniendo transcript:', transcriptError);
+      }
+
+      if (transcriptData) {
+        console.log('✅ [Debug] Transcripción encontrada:', {
+          id: transcriptData.id,
+          call_id: transcriptData.call_id,
+          content_preview: transcriptData.content?.substring(0, 100),
+          content_length: transcriptData.content?.length
+        });
+        setTranscript(transcriptData);
+      } else {
+        console.warn('⚠️ [Debug] No se encontró transcripción para este call_id');
+      }
+
+      // ✅ Obtener usuario
       const { data: userDetailData, error: userDetailError } = await supabase
         .from('users')
         .select('*')
@@ -106,6 +151,7 @@ export default function TranscriptionPage() {
       setUser(userDetailData);
 
     } catch (err: any) {
+      console.error('❌ [Debug] Error general:', err);
       showToast(err.message || 'Error al cargar datos', 'error');
     } finally {
       setLoading(false);
@@ -174,7 +220,7 @@ export default function TranscriptionPage() {
   };
 
   const downloadTranscript = () => {
-    if (!call || !call.transcript || !user) return;
+    if (!call || !transcript || !user) return;
 
     const content = `
 TRANSCRIPCIÓN DE LLAMADA
@@ -187,7 +233,7 @@ Estado: ${getStatusInfo(call.status).label}
 
 Transcripción:
 --------------
-${call.transcript}
+${transcript.content}
 
 ID de Llamada: ${call.id}
 ID de Conversación ElevenLabs: ${call.elevenlabs_conversation_id || 'N/A'}
@@ -240,7 +286,7 @@ ID de Conversación ElevenLabs: ${call.elevenlabs_conversation_id || 'N/A'}
               variant="primary"
               size="lg"
               onClick={downloadTranscript}
-              disabled={!call?.transcript}
+              disabled={!transcript}
               className="w-full sm:w-auto"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -347,7 +393,7 @@ ID de Conversación ElevenLabs: ${call.elevenlabs_conversation_id || 'N/A'}
           </div>
 
           <div className="p-4 sm:p-6 lg:p-8">
-            {!call?.transcript ? (
+            {!transcript?.content ? (
               <div className="text-center py-8 sm:py-12">
                 <svg className="w-16 h-16 sm:w-20 sm:h-20 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -358,12 +404,22 @@ ID de Conversación ElevenLabs: ${call.elevenlabs_conversation_id || 'N/A'}
                 <p className="text-sm sm:text-base text-gray-600">
                   Esta llamada aún no tiene una transcripción o está siendo procesada
                 </p>
+                {/* DEBUG INFO */}
+                <div className="mt-4 p-4 bg-yellow-50 rounded-lg text-left max-w-md mx-auto">
+                  <p className="text-xs font-mono text-gray-700">
+                    <strong>Debug:</strong><br/>
+                    Call ID: {call?.id || 'N/A'}<br/>
+                    Transcript found: {transcript ? 'Sí' : 'No'}<br/>
+                    Content length: {transcript?.content?.length || 0}<br/>
+                    Abre la consola (F12) para más detalles
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="bg-gray-50 rounded-lg p-4 sm:p-6 lg:p-8 border-2 border-gray-200">
                 <div className="prose prose-sm sm:prose-base lg:prose-lg max-w-none">
                   <pre className="whitespace-pre-wrap text-sm sm:text-base lg:text-lg leading-relaxed text-gray-800 font-sans break-words">
-                    {call.transcript}
+                    {transcript.content}
                   </pre>
                 </div>
               </div>
